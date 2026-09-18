@@ -74,14 +74,12 @@ The plugin currently targets modern Neovim versions and is being developed prima
 
 ```lua
 {
-  "YOUR_GITHUB_USERNAME/draw.nvim",
+  "Gleventis/draw.nvim",
   config = function()
     require("draw").setup()
   end,
 }
 ```
-
-Replace `YOUR_GITHUB_USERNAME` with the GitHub account hosting the repository.
 
 ## Usage
 
