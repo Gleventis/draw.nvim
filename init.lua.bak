@@ -1,0 +1,1267 @@
+local topology = require "draw.topology"
+
+local M = {}
+
+local states = {}
+
+local directions = {
+  left = {
+    row = 0,
+    col = -1,
+    opposite = "right",
+  },
+
+  right = {
+    row = 0,
+    col = 1,
+    opposite = "left",
+  },
+
+  up = {
+    row = -1,
+    col = 0,
+    opposite = "down",
+  },
+
+  down = {
+    row = 1,
+    col = 0,
+    opposite = "up",
+  },
+}
+
+local arrowheads = {
+  left = "◀",
+  right = "▶",
+  up = "▲",
+  down = "▼",
+}
+
+local arrowhead_lookup = {
+  ["◀"] = true,
+  ["▶"] = true,
+  ["▲"] = true,
+  ["▼"] = true,
+}
+
+---------------------------------------------------------------------
+-- Buffer helpers
+---------------------------------------------------------------------
+
+local function get_line(buf, row)
+  local lines = vim.api.nvim_buf_get_lines(
+    buf,
+    row,
+    row + 1,
+    false
+  )
+
+  return lines[1] or ""
+end
+
+local function set_line(buf, row, line)
+  vim.api.nvim_buf_set_lines(
+    buf,
+    row,
+    row + 1,
+    false,
+    { line }
+  )
+end
+
+local function ensure_row(buf, row)
+  local line_count = vim.api.nvim_buf_line_count(buf)
+
+  while row >= line_count do
+    vim.api.nvim_buf_set_lines(
+      buf,
+      line_count,
+      line_count,
+      false,
+      { "" }
+    )
+
+    line_count = line_count + 1
+  end
+end
+
+local function char_count(line)
+  return vim.fn.strchars(line)
+end
+
+local function ensure_col(buf, row, col)
+  ensure_row(buf, row)
+
+  local line = get_line(buf, row)
+  local length = char_count(line)
+
+  if col >= length then
+    local missing = col - length + 1
+
+    set_line(
+      buf,
+      row,
+      line .. string.rep(" ", missing)
+    )
+  end
+end
+
+local function get_char(buf, row, col)
+  ensure_col(buf, row, col)
+
+  local line = get_line(buf, row)
+
+  return vim.fn.strcharpart(
+    line,
+    col,
+    1
+  )
+end
+
+local function set_char(buf, row, col, value)
+  ensure_col(buf, row, col)
+
+  local line = get_line(buf, row)
+
+  local before = vim.fn.strcharpart(
+    line,
+    0,
+    col
+  )
+
+  local after = vim.fn.strcharpart(
+    line,
+    col + 1
+  )
+
+  set_line(
+    buf,
+    row,
+    before .. value .. after
+  )
+end
+
+local function is_arrowhead(char)
+  return arrowhead_lookup[char] == true
+end
+
+---------------------------------------------------------------------
+-- Cursor helpers
+---------------------------------------------------------------------
+
+local function current_position()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+
+  local row = cursor[1] - 1
+  local byte_col = cursor[2]
+
+  local line = vim.api.nvim_get_current_line()
+
+  local prefix = line:sub(
+    1,
+    byte_col
+  )
+
+  local col = vim.fn.strchars(prefix)
+
+  return row, col
+end
+
+local function set_cursor(buf, row, col)
+  ensure_col(buf, row, col)
+
+  local line = get_line(buf, row)
+
+  local prefix = vim.fn.strcharpart(
+    line,
+    0,
+    col
+  )
+
+  local byte_col = #prefix
+
+  vim.api.nvim_win_set_cursor(
+    0,
+    {
+      row + 1,
+      byte_col,
+    }
+  )
+end
+
+---------------------------------------------------------------------
+-- Undo
+---------------------------------------------------------------------
+
+local function undo_join()
+  pcall(vim.cmd, "undojoin")
+end
+
+---------------------------------------------------------------------
+-- Movement only
+---------------------------------------------------------------------
+
+local function move_only(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  local delta = directions[direction]
+
+  local row, col = current_position()
+
+  local target_row = row + delta.row
+  local target_col = col + delta.col
+
+  if target_row < 0 then
+    target_row = 0
+  end
+
+  if target_col < 0 then
+    target_col = 0
+  end
+
+  set_cursor(
+    buf,
+    target_row,
+    target_col
+  )
+end
+
+---------------------------------------------------------------------
+-- Drawing
+---------------------------------------------------------------------
+
+local function draw(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  local delta = directions[direction]
+
+  local row, col = current_position()
+
+  local target_row = row + delta.row
+  local target_col = col + delta.col
+
+  if target_row < 0 or target_col < 0 then
+    return
+  end
+
+  ensure_col(
+    buf,
+    row,
+    col
+  )
+
+  ensure_col(
+    buf,
+    target_row,
+    target_col
+  )
+
+  local current_char = get_char(
+    buf,
+    row,
+    col
+  )
+
+  local target_char = get_char(
+    buf,
+    target_row,
+    target_col
+  )
+
+  local current_connections =
+    topology.from_char(current_char)
+
+  local target_connections =
+    topology.from_char(target_char)
+
+  -- Don't draw through ordinary text or arrowheads.
+  if
+    current_connections == nil
+    or target_connections == nil
+  then
+    set_cursor(
+      buf,
+      target_row,
+      target_col
+    )
+
+    return
+  end
+
+  topology.add(
+    current_connections,
+    direction
+  )
+
+  topology.add(
+    target_connections,
+    delta.opposite
+  )
+
+  set_char(
+    buf,
+    row,
+    col,
+    topology.to_char(
+      current_connections
+    )
+  )
+
+  undo_join()
+
+  set_char(
+    buf,
+    target_row,
+    target_col,
+    topology.to_char(
+      target_connections
+    )
+  )
+
+  set_cursor(
+    buf,
+    target_row,
+    target_col
+  )
+end
+
+---------------------------------------------------------------------
+-- Arrowheads
+---------------------------------------------------------------------
+
+local function place_arrowhead(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  if state.mode == "erase" then
+    vim.notify(
+      "Exit ERASE mode with x first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  if state.mode == "box" then
+    vim.notify(
+      "Finish the box with B or cancel with Esc first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  local row, col = current_position()
+  local char = get_char(buf, row, col)
+
+  if char == "" or char == " " then
+    vim.notify(
+      "Move cursor onto a line endpoint first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  if is_arrowhead(char) then
+    set_char(
+      buf,
+      row,
+      col,
+      arrowheads[direction]
+    )
+
+    set_cursor(buf, row, col)
+    return
+  end
+
+  local connections = topology.from_char(char)
+
+  if connections == nil then
+    vim.notify(
+      "Cannot place arrowhead on normal text",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  if direction == "left" or direction == "right" then
+    if char ~= "─" then
+      vim.notify(
+        "LA and RA work on horizontal line cells",
+        vim.log.levels.WARN
+      )
+
+      return
+    end
+  else
+    if char ~= "│" then
+      vim.notify(
+        "UA and DA work on vertical line cells",
+        vim.log.levels.WARN
+      )
+
+      return
+    end
+  end
+
+  set_char(
+    buf,
+    row,
+    col,
+    arrowheads[direction]
+  )
+
+  set_cursor(buf, row, col)
+end
+
+---------------------------------------------------------------------
+-- Erase one specific cell
+---------------------------------------------------------------------
+
+local function erase_at(buf, row, col)
+  local char = get_char(
+    buf,
+    row,
+    col
+  )
+
+  -------------------------------------------------------------------
+  -- Arrowheads are terminal markers, not topology cells.
+  -- Just delete them directly.
+  -------------------------------------------------------------------
+
+  if is_arrowhead(char) then
+    set_char(
+      buf,
+      row,
+      col,
+      " "
+    )
+
+    return
+  end
+
+  local connections =
+    topology.from_char(char)
+
+  -- Don't touch ordinary text.
+  if connections == nil then
+    return
+  end
+
+  if char == "" or char == " " then
+    return
+  end
+
+  set_char(
+    buf,
+    row,
+    col,
+    " "
+  )
+
+  -------------------------------------------------------------------
+  -- Repair connected neighbors.
+  -------------------------------------------------------------------
+
+  for direction, delta in pairs(directions) do
+    if connections[direction] then
+      local neighbor_row =
+        row + delta.row
+
+      local neighbor_col =
+        col + delta.col
+
+      if
+        neighbor_row >= 0
+        and neighbor_col >= 0
+      then
+        local line_count =
+          vim.api.nvim_buf_line_count(buf)
+
+        if neighbor_row < line_count then
+          local line =
+            get_line(
+              buf,
+              neighbor_row
+            )
+
+          if
+            neighbor_col
+            < char_count(line)
+          then
+            local neighbor_char =
+              get_char(
+                buf,
+                neighbor_row,
+                neighbor_col
+              )
+
+            if not is_arrowhead(neighbor_char) then
+              local neighbor_connections =
+                topology.from_char(
+                  neighbor_char
+                )
+
+              if neighbor_connections ~= nil then
+                topology.remove(
+                  neighbor_connections,
+                  delta.opposite
+                )
+
+                undo_join()
+
+                set_char(
+                  buf,
+                  neighbor_row,
+                  neighbor_col,
+                  topology.to_char(
+                    neighbor_connections
+                  )
+                )
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+---------------------------------------------------------------------
+-- Move and erase
+---------------------------------------------------------------------
+
+local function erase_move(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  local delta = directions[direction]
+
+  local row, col = current_position()
+
+  local target_row = row + delta.row
+  local target_col = col + delta.col
+
+  if target_row < 0 then
+    target_row = 0
+  end
+
+  if target_col < 0 then
+    target_col = 0
+  end
+
+  ensure_col(
+    buf,
+    target_row,
+    target_col
+  )
+
+  erase_at(
+    buf,
+    target_row,
+    target_col
+  )
+
+  set_cursor(
+    buf,
+    target_row,
+    target_col
+  )
+end
+
+---------------------------------------------------------------------
+-- Box helpers
+---------------------------------------------------------------------
+
+local function box_connections(row, col, top, bottom, left, right)
+  if row == top and col == left then
+    return {
+      down = true,
+      right = true,
+    }
+  end
+
+  if row == top and col == right then
+    return {
+      down = true,
+      left = true,
+    }
+  end
+
+  if row == bottom and col == left then
+    return {
+      up = true,
+      right = true,
+    }
+  end
+
+  if row == bottom and col == right then
+    return {
+      up = true,
+      left = true,
+    }
+  end
+
+  if row == top or row == bottom then
+    return {
+      left = true,
+      right = true,
+    }
+  end
+
+  return {
+    up = true,
+    down = true,
+  }
+end
+
+local function draw_box(buf, start_row, start_col, end_row, end_col)
+  local top = math.min(
+    start_row,
+    end_row
+  )
+
+  local bottom = math.max(
+    start_row,
+    end_row
+  )
+
+  local left = math.min(
+    start_col,
+    end_col
+  )
+
+  local right = math.max(
+    start_col,
+    end_col
+  )
+
+  if top == bottom or left == right then
+    vim.notify(
+      "Box needs both width and height",
+      vim.log.levels.WARN
+    )
+
+    return false
+  end
+
+  ensure_col(
+    buf,
+    bottom,
+    right
+  )
+
+  -------------------------------------------------------------------
+  -- Validate perimeter first.
+  -------------------------------------------------------------------
+
+  for row = top, bottom do
+    for col = left, right do
+      local perimeter =
+        row == top
+        or row == bottom
+        or col == left
+        or col == right
+
+      if perimeter then
+        local char = get_char(
+          buf,
+          row,
+          col
+        )
+
+        if is_arrowhead(char) then
+          vim.notify(
+            "Cannot draw box over arrowheads",
+            vim.log.levels.WARN
+          )
+
+          return false
+        end
+
+        local connections =
+          topology.from_char(char)
+
+        if connections == nil then
+          vim.notify(
+            "Cannot draw box over normal text",
+            vim.log.levels.WARN
+          )
+
+          return false
+        end
+      end
+    end
+  end
+
+  local first_change = true
+
+  for row = top, bottom do
+    for col = left, right do
+      local perimeter =
+        row == top
+        or row == bottom
+        or col == left
+        or col == right
+
+      if perimeter then
+        local current_char = get_char(
+          buf,
+          row,
+          col
+        )
+
+        local connections =
+          topology.from_char(
+            current_char
+          )
+
+        local needed =
+          box_connections(
+            row,
+            col,
+            top,
+            bottom,
+            left,
+            right
+          )
+
+        for direction, enabled in pairs(needed) do
+          if enabled then
+            topology.add(
+              connections,
+              direction
+            )
+          end
+        end
+
+        if not first_change then
+          undo_join()
+        end
+
+        set_char(
+          buf,
+          row,
+          col,
+          topology.to_char(
+            connections
+          )
+        )
+
+        first_change = false
+      end
+    end
+  end
+
+  return true
+end
+
+---------------------------------------------------------------------
+-- Toggle box selection
+---------------------------------------------------------------------
+
+local function toggle_box()
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  if state.mode == "erase" then
+    vim.notify(
+      "Exit ERASE mode with x first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  if state.mode ~= "box" then
+    local row, col = current_position()
+
+    state.box_start = {
+      row = row,
+      col = col,
+    }
+
+    state.mode = "box"
+    vim.b[buf].draw_submode = "box"
+
+    vim.notify(
+      "-- BOX -- move to opposite corner, press B"
+    )
+
+    return
+  end
+
+  local end_row, end_col = current_position()
+  local start = state.box_start
+
+  if start == nil then
+    state.mode = "draw"
+    vim.b[buf].draw_submode = "draw"
+    return
+  end
+
+  local success =
+    draw_box(
+      buf,
+      start.row,
+      start.col,
+      end_row,
+      end_col
+    )
+
+  if not success then
+    return
+  end
+
+  state.box_start = nil
+  state.mode = "draw"
+  vim.b[buf].draw_submode = "draw"
+
+  set_cursor(
+    buf,
+    end_row,
+    end_col
+  )
+
+  vim.notify("-- DRAW --")
+end
+
+---------------------------------------------------------------------
+-- Cancel box selection
+---------------------------------------------------------------------
+
+local function cancel_box()
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  if state.mode ~= "box" then
+    return
+  end
+
+  state.box_start = nil
+  state.mode = "draw"
+  vim.b[buf].draw_submode = "draw"
+
+  vim.notify("Box cancelled")
+end
+
+---------------------------------------------------------------------
+-- Arrow handler
+---------------------------------------------------------------------
+
+local function handle_arrow(direction)
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  if state.mode == "erase" then
+    erase_move(direction)
+    return
+  end
+
+  if state.mode == "box" then
+    move_only(direction)
+    return
+  end
+
+  draw(direction)
+end
+
+---------------------------------------------------------------------
+-- Toggle erase mode
+---------------------------------------------------------------------
+
+local function toggle_erase()
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  if state.mode == "box" then
+    vim.notify(
+      "Finish the box with B or cancel with Esc",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  if state.mode == "erase" then
+    state.mode = "draw"
+    vim.b[buf].draw_submode = "draw"
+    vim.notify("-- DRAW --")
+    return
+  end
+
+  state.mode = "erase"
+  vim.b[buf].draw_submode = "erase"
+
+  local row, col = current_position()
+
+  erase_at(
+    buf,
+    row,
+    col
+  )
+
+  set_cursor(
+    buf,
+    row,
+    col
+  )
+
+  vim.notify("-- ERASE --")
+end
+
+---------------------------------------------------------------------
+-- Mapping helper
+---------------------------------------------------------------------
+
+local function map(state, mode, lhs, rhs)
+  vim.keymap.set(
+    mode,
+    lhs,
+    rhs,
+    {
+      buffer = state.buf,
+      silent = true,
+      nowait = true,
+    }
+  )
+
+  table.insert(
+    state.maps,
+    {
+      mode = mode,
+      lhs = lhs,
+    }
+  )
+end
+
+---------------------------------------------------------------------
+-- Stop Draw mode
+---------------------------------------------------------------------
+
+function M.stop()
+  local buf = vim.api.nvim_get_current_buf()
+  local state = states[buf]
+
+  if state == nil then
+    return
+  end
+
+  for _, mapping in ipairs(state.maps) do
+    pcall(
+      vim.keymap.del,
+      mapping.mode,
+      mapping.lhs,
+      {
+        buffer = buf,
+      }
+    )
+  end
+
+  if vim.api.nvim_win_is_valid(state.win) then
+    pcall(
+      vim.api.nvim_set_option_value,
+      "virtualedit",
+      state.virtualedit,
+      {
+        win = state.win,
+      }
+    )
+
+    pcall(
+      vim.api.nvim_set_option_value,
+      "wrap",
+      state.wrap,
+      {
+        win = state.win,
+      }
+    )
+  end
+
+  vim.b[buf].draw_mode = false
+  vim.b[buf].draw_submode = nil
+
+  states[buf] = nil
+
+  vim.notify("Draw mode disabled")
+end
+
+---------------------------------------------------------------------
+-- Start Draw mode
+---------------------------------------------------------------------
+
+function M.start()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if states[buf] ~= nil then
+    return
+  end
+
+  local win = vim.api.nvim_get_current_win()
+
+  local state = {
+    buf = buf,
+    win = win,
+
+    maps = {},
+
+    mode = "draw",
+    box_start = nil,
+
+    virtualedit =
+      vim.api.nvim_get_option_value(
+        "virtualedit",
+        {
+          win = win,
+        }
+      ),
+
+    wrap =
+      vim.api.nvim_get_option_value(
+        "wrap",
+        {
+          win = win,
+        }
+      ),
+  }
+
+  states[buf] = state
+
+  vim.api.nvim_set_option_value(
+    "virtualedit",
+    "all",
+    {
+      win = win,
+    }
+  )
+
+  vim.api.nvim_set_option_value(
+    "wrap",
+    false,
+    {
+      win = win,
+    }
+  )
+
+  vim.b[buf].draw_mode = true
+  vim.b[buf].draw_submode = "draw"
+
+  -------------------------------------------------------------------
+  -- Arrow keys
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "<Left>",
+    function()
+      handle_arrow "left"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<Right>",
+    function()
+      handle_arrow "right"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<Up>",
+    function()
+      handle_arrow "up"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<Down>",
+    function()
+      handle_arrow "down"
+    end
+  )
+
+  -------------------------------------------------------------------
+  -- Shift + Arrow always moves only
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "<S-Left>",
+    function()
+      move_only "left"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<S-Right>",
+    function()
+      move_only "right"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<S-Up>",
+    function()
+      move_only "up"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "<S-Down>",
+    function()
+      move_only "down"
+    end
+  )
+
+  -------------------------------------------------------------------
+  -- x toggles DRAW <-> ERASE
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "x",
+    toggle_erase
+  )
+
+  -------------------------------------------------------------------
+  -- B starts/completes a box
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "B",
+    toggle_box
+  )
+
+  -------------------------------------------------------------------
+  -- Esc cancels unfinished box
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "<Esc>",
+    cancel_box
+  )
+
+  -------------------------------------------------------------------
+  -- Arrowheads
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "LA",
+    function()
+      place_arrowhead "left"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "RA",
+    function()
+      place_arrowhead "right"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "UA",
+    function()
+      place_arrowhead "up"
+    end
+  )
+
+  map(
+    state,
+    "n",
+    "DA",
+    function()
+      place_arrowhead "down"
+    end
+  )
+
+  -------------------------------------------------------------------
+  -- q exits Draw mode completely
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "q",
+    function()
+      M.stop()
+    end
+  )
+
+  vim.notify("-- DRAW --")
+end
+
+---------------------------------------------------------------------
+-- Toggle Draw
+---------------------------------------------------------------------
+
+function M.toggle()
+  local buf = vim.api.nvim_get_current_buf()
+
+  if states[buf] then
+    M.stop()
+  else
+    M.start()
+  end
+end
+
+---------------------------------------------------------------------
+-- Setup
+---------------------------------------------------------------------
+
+function M.setup()
+  vim.api.nvim_create_user_command(
+    "Draw",
+    function()
+      M.toggle()
+    end,
+    {
+      desc = "Toggle Draw mode",
+    }
+  )
+end
+
+return M
