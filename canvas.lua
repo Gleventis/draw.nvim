@@ -34,7 +34,7 @@ M.directions = {
 -- Buffer helpers
 ---------------------------------------------------------------------
 
-function M.get_line(buf, row)
+function M.get_line(buf, row, region)
   local lines = vim.api.nvim_buf_get_lines(
     buf,
     row,
@@ -42,33 +42,49 @@ function M.get_line(buf, row)
     false
   )
 
-  return lines[1] or ""
+  local line = lines[1] or ""
+
+  if region then
+    line = vim.fn.strcharpart(line, region.prefix_len)
+  end
+
+  return line
 end
 
-function M.set_line(buf, row, line)
+function M.set_line(buf, row, line, region)
+  local content = region
+    and (region.prefix .. line)
+    or line
+
   vim.api.nvim_buf_set_lines(
     buf,
     row,
     row + 1,
     false,
-    { line }
+    { content }
   )
 end
 
-function M.ensure_row(buf, row)
+function M.ensure_row(buf, row, region)
   local line_count =
     vim.api.nvim_buf_line_count(buf)
 
   while row >= line_count do
+    local new_line = region and region.prefix or ""
+
     vim.api.nvim_buf_set_lines(
       buf,
       line_count,
       line_count,
       false,
-      { "" }
+      { new_line }
     )
 
     line_count = line_count + 1
+  end
+
+  if region and row > region.bottom_row then
+    region.bottom_row = row
   end
 end
 
@@ -76,10 +92,10 @@ function M.char_count(line)
   return vim.fn.strchars(line)
 end
 
-function M.ensure_col(buf, row, col)
-  M.ensure_row(buf, row)
+function M.ensure_col(buf, row, col, region)
+  M.ensure_row(buf, row, region)
 
-  local line = M.get_line(buf, row)
+  local line = M.get_line(buf, row, region)
   local length = M.char_count(line)
 
   if col >= length then
@@ -89,16 +105,17 @@ function M.ensure_col(buf, row, col)
     M.set_line(
       buf,
       row,
-      line .. string.rep(" ", missing)
+      line .. string.rep(" ", missing),
+      region
     )
   end
 end
 
-function M.get_char(buf, row, col)
-  M.ensure_col(buf, row, col)
+function M.get_char(buf, row, col, region)
+  M.ensure_col(buf, row, col, region)
 
   local line =
-    M.get_line(buf, row)
+    M.get_line(buf, row, region)
 
   return vim.fn.strcharpart(
     line,
@@ -108,7 +125,7 @@ function M.get_char(buf, row, col)
 end
 
 -- Non-mutating read: returns "" for out-of-bounds without extending the buffer.
-function M.safe_get_char(buf, row, col)
+function M.safe_get_char(buf, row, col, region)
   if row < 0 or col < 0 then
     return ""
   end
@@ -121,7 +138,7 @@ function M.safe_get_char(buf, row, col)
   end
 
   local line =
-    M.get_line(buf, row)
+    M.get_line(buf, row, region)
 
   if col >= M.char_count(line) then
     return ""
@@ -130,11 +147,11 @@ function M.safe_get_char(buf, row, col)
   return vim.fn.strcharpart(line, col, 1)
 end
 
-function M.set_char(buf, row, col, value)
-  M.ensure_col(buf, row, col)
+function M.set_char(buf, row, col, value, region)
+  M.ensure_col(buf, row, col, region)
 
   local line =
-    M.get_line(buf, row)
+    M.get_line(buf, row, region)
 
   local before =
     vim.fn.strcharpart(
@@ -152,7 +169,8 @@ function M.set_char(buf, row, col, value)
   M.set_line(
     buf,
     row,
-    before .. value .. after
+    before .. value .. after,
+    region
   )
 end
 
@@ -160,7 +178,7 @@ end
 -- Cursor helpers
 ---------------------------------------------------------------------
 
-function M.current_position()
+function M.current_position(region)
   local cursor =
     vim.api.nvim_win_get_cursor(0)
 
@@ -181,20 +199,27 @@ function M.current_position()
   local col =
     vim.fn.strchars(prefix)
 
+  if region then
+    col = col - region.prefix_len
+  end
+
   return row, col
 end
 
-function M.set_cursor(buf, row, col)
-  M.ensure_col(buf, row, col)
+function M.set_cursor(buf, row, col, region)
+  M.ensure_col(buf, row, col, region)
 
   local line =
     M.get_line(buf, row)
+
+  local effective_col =
+    col + (region and region.prefix_len or 0)
 
   local prefix =
     vim.fn.strcharpart(
       line,
       0,
-      col
+      effective_col
     )
 
   local byte_col =

@@ -30,7 +30,8 @@ end
 function M.place(
   buf,
   state,
-  direction
+  direction,
+  region
 )
   if state.mode == "erase" then
     vim.notify(
@@ -51,13 +52,14 @@ function M.place(
   end
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local char =
     canvas.get_char(
       buf,
       row,
-      col
+      col,
+      region
     )
 
   if char == "" or char == " " then
@@ -78,13 +80,15 @@ function M.place(
       buf,
       row,
       col,
-      arrowheads[direction]
+      arrowheads[direction],
+      region
     )
 
     canvas.set_cursor(
       buf,
       row,
-      col
+      col,
+      region
     )
 
     return
@@ -138,13 +142,15 @@ function M.place(
     buf,
     row,
     col,
-    arrowheads[direction]
+    arrowheads[direction],
+    region
   )
 
   canvas.set_cursor(
     buf,
     row,
-    col
+    col,
+    region
   )
 end
 

@@ -280,10 +280,43 @@ Currently detected:
 
 No separate metadata file is required.
 
+## SafeDraw
+
+Draw diagrams inside comment blocks of source files using `:SafeDraw`.
+
+**Supported filetypes**
+
+| Extension | Comment prefix |
+|---|---|
+| `.yaml`, `.yml` | `# ` |
+| `.py` | `# ` |
+| `.go` | `// ` |
+
+**How it works**
+
+Place the cursor inside a comment block, then run `:SafeDraw`. draw.nvim detects
+the comment prefix from the current line, scans contiguous lines sharing that
+prefix to define the region, then activates Draw mode with all operations
+transparently offset past the prefix.
+
+```python
+def foo():
+    # ┌──────────┐
+    # │ Service  │
+    # └──────────┘
+```
+
+`:Draw` is unchanged — `:SafeDraw` is the opt-in variant for working inside
+comment blocks. Run `:SafeDraw` again (or `q`) to exit.
+
+If the cursor is not inside a comment block of a supported filetype, a
+notification is shown and Draw mode does not activate.
+
 ## Keymaps
 
 | Keymap          | Behavior                                                    |
 | --------------- | ----------------------------------------------------------- |
+| `:SafeDraw` | Toggle SafeDraw mode inside a comment block |
 | `:Draw`         | Toggle Draw mode                                            |
 | `←` `→` `↑` `↓` | Draw topology-aware lines                                   |
 | `Shift + Arrow` | Move the cursor without drawing                             |
@@ -319,7 +352,6 @@ No separate metadata file is required.
 
 Planned next:
 
-* drawing safely inside comments in source files
 * clear all contents of a shape
 * resize shapes
 * centered labels

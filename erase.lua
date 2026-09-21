@@ -16,12 +16,13 @@ local M = {}
 -- Erase one cell
 ---------------------------------------------------------------------
 
-function M.at(buf, row, col)
+function M.at(buf, row, col, region)
   local char =
     canvas.get_char(
       buf,
       row,
-      col
+      col,
+      region
     )
 
   -------------------------------------------------------------------
@@ -33,7 +34,8 @@ function M.at(buf, row, col)
       buf,
       row,
       col,
-      " "
+      " ",
+      region
     )
 
     return
@@ -52,7 +54,8 @@ function M.at(buf, row, col)
       buf,
       row,
       col,
-      " "
+      " ",
+      region
     )
 
     return
@@ -77,7 +80,8 @@ function M.at(buf, row, col)
     buf,
     row,
     col,
-    " "
+    " ",
+    region
   )
 
   -------------------------------------------------------------------
@@ -98,7 +102,8 @@ function M.at(buf, row, col)
         canvas.safe_get_char(
           buf,
           neighbor_row,
-          neighbor_col
+          neighbor_col,
+          region
         )
 
       if
@@ -131,7 +136,8 @@ function M.at(buf, row, col)
             neighbor_col,
             topology.to_char(
               neighbor_connections
-            )
+            ),
+            region
           )
         end
       end
@@ -143,7 +149,7 @@ end
 -- Move and erase
 ---------------------------------------------------------------------
 
-function M.move(direction)
+function M.move(direction, region)
   local buf =
     vim.api.nvim_get_current_buf()
 
@@ -151,7 +157,7 @@ function M.move(direction)
     canvas.directions[direction]
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local target_row =
     row + delta.row
@@ -170,19 +176,22 @@ function M.move(direction)
   canvas.ensure_col(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 
   M.at(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 
   canvas.set_cursor(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 end
 

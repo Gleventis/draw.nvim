@@ -27,8 +27,11 @@ function M.clear_row(state)
   local buf =
     vim.api.nvim_get_current_buf()
 
+  local region =
+    state.region
+
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   -------------------------------------------------------------------
   -- Find the shape we're currently inside
@@ -89,7 +92,8 @@ function M.clear_row(state)
       buf,
       row,
       current_col,
-      " "
+      " ",
+      region
     )
 
     first_change = false
@@ -102,7 +106,8 @@ function M.clear_row(state)
   canvas.set_cursor(
     buf,
     row,
-    left
+    left,
+    region
   )
 end
 

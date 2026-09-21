@@ -52,12 +52,13 @@ end
 --   style: Table with fields type, top_left, top_right, bottom_left,
 --          bottom_right, make_shape (e.g. { type = "rectangle", ... }).
 function M.register_rectangular_scanner(style)
-  M.register(function(buf, results, seen)
+  M.register(function(buf, results, seen, region)
     scan_rectangular(
       buf,
       style,
       results,
-      seen
+      seen,
+      region
     )
   end)
 end
@@ -71,12 +72,14 @@ local canvas =
 
 local function row_width(
   buf,
-  row
+  row,
+  region
 )
   local line =
     canvas.get_line(
       buf,
-      row
+      row,
+      region
     )
 
   return canvas.char_count(line)
@@ -147,7 +150,8 @@ local function strict_horizontal_edge(
   buf,
   row,
   left,
-  right
+  right,
+  region
 )
   if right - left < 2 then
     return false
@@ -161,7 +165,8 @@ local function strict_horizontal_edge(
       canvas.safe_get_char(
         buf,
         row,
-        col
+        col,
+        region
       ) ~= "─"
     then
       return false
@@ -189,7 +194,8 @@ local function strict_vertical_edge(
   buf,
   col,
   top,
-  bottom
+  bottom,
+  region
 )
   if bottom - top < 2 then
     return false
@@ -203,7 +209,8 @@ local function strict_vertical_edge(
       canvas.safe_get_char(
         buf,
         row,
-        col
+        col,
+        region
       ) ~= "│"
     then
       return false
@@ -221,16 +228,24 @@ scan_rectangular = function(
   buf,
   style,
   results,
-  seen
+  seen,
+  region
 )
   local line_count =
     vim.api.nvim_buf_line_count(buf)
 
-  for top = 0, line_count - 1 do
+  local top_limit =
+    region and region.top_row or 0
+
+  local bottom_limit =
+    region and region.bottom_row or (line_count - 1)
+
+  for top = top_limit, bottom_limit do
     local width =
       row_width(
         buf,
-        top
+        top,
+        region
       )
 
     for left = 0, width - 1 do
@@ -242,7 +257,8 @@ scan_rectangular = function(
         canvas.safe_get_char(
           buf,
           top,
-          left
+          left,
+          region
         ) == style.top_left
       then
         ----------------------------------------------------------------
@@ -257,13 +273,15 @@ scan_rectangular = function(
             canvas.safe_get_char(
               buf,
               top,
-              right
+              right,
+              region
             ) == style.top_right
             and strict_horizontal_edge(
               buf,
               top,
               left,
-              right
+              right,
+              region
             )
           then
             ------------------------------------------------------------
@@ -272,40 +290,45 @@ scan_rectangular = function(
 
             for bottom =
               top + 2,
-              line_count - 1
+              bottom_limit
             do
               if
                 canvas.safe_get_char(
                   buf,
                   bottom,
-                  left
+                  left,
+                  region
                 ) == style.bottom_left
 
                 and canvas.safe_get_char(
                   buf,
                   bottom,
-                  right
+                  right,
+                  region
                 ) == style.bottom_right
 
                 and strict_horizontal_edge(
                   buf,
                   bottom,
                   left,
-                  right
+                  right,
+                  region
                 )
 
                 and strict_vertical_edge(
                   buf,
                   left,
                   top,
-                  bottom
+                  bottom,
+                  region
                 )
 
                 and strict_vertical_edge(
                   buf,
                   right,
                   top,
-                  bottom
+                  bottom,
+                  region
                 )
               then
                 add_result(
@@ -337,7 +360,7 @@ end
 -- Public scan
 ---------------------------------------------------------------------
 
-function M.scan(buf)
+function M.scan(buf, region)
   local results = {}
   local seen = {}
 
@@ -345,7 +368,8 @@ function M.scan(buf)
     scan_fn(
       buf,
       results,
-      seen
+      seen,
+      region
     )
   end
 

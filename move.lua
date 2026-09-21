@@ -16,7 +16,7 @@ local M = {}
 --   { { row = r, col = c, char = ch }, ... }
 ---------------------------------------------------------------------
 
-function M.capture_cells(buf, shape)
+function M.capture_cells(buf, shape, region)
   local cells = {}
 
   for row = shape.top, shape.bottom do
@@ -26,7 +26,7 @@ function M.capture_cells(buf, shape)
     if left ~= nil and right ~= nil then
       for col = left, right do
         local char =
-          canvas.get_char(buf, row, col)
+          canvas.get_char(buf, row, col, region)
 
         table.insert(cells, {
           row = row,
@@ -48,7 +48,7 @@ end
 -- Sets context.changed = true after the first write.
 ---------------------------------------------------------------------
 
-function M.erase_cells(buf, shape, context)
+function M.erase_cells(buf, shape, context, region)
   for row = shape.top, shape.bottom do
     local left, right =
       shape.span(shape, row)
@@ -59,7 +59,7 @@ function M.erase_cells(buf, shape, context)
           canvas.undo_join()
         end
 
-        canvas.set_char(buf, row, col, " ")
+        canvas.set_char(buf, row, col, " ", region)
         context.changed = true
       end
     end
@@ -75,7 +75,7 @@ end
 -- Sets context.changed = true after the first write.
 ---------------------------------------------------------------------
 
-function M.write_cells(buf, cells, delta_row, delta_col, context)
+function M.write_cells(buf, cells, delta_row, delta_col, context, region)
   for _, cell in ipairs(cells) do
     local row = cell.row + delta_row
     local col = cell.col + delta_col
@@ -84,7 +84,7 @@ function M.write_cells(buf, cells, delta_row, delta_col, context)
       canvas.undo_join()
     end
 
-    canvas.set_char(buf, row, col, cell.char)
+    canvas.set_char(buf, row, col, cell.char, region)
     context.changed = true
   end
 end
@@ -100,7 +100,7 @@ end
 -- Returns true when the move is safe, false otherwise.
 ---------------------------------------------------------------------
 
-function M.validate(buf, state, shape, delta_row, delta_col)
+function M.validate(buf, state, shape, delta_row, delta_col, region)
   -- Build a set of current cell positions for fast lookup.
   local current = {}
   for row = shape.top, shape.bottom do
@@ -128,7 +128,7 @@ function M.validate(buf, state, shape, delta_row, delta_col)
         -- Only check cells not already occupied by this shape.
         if not current[new_row .. "," .. new_col] then
           -- Reject non-empty cells.
-          local ch = canvas.safe_get_char(buf, new_row, new_col)
+          local ch = canvas.safe_get_char(buf, new_row, new_col, region)
           if ch ~= "" and ch ~= " " then
             return false
           end
@@ -180,18 +180,18 @@ end
 -- context.changed (same contract as erase_cells / write_cells).
 ---------------------------------------------------------------------
 
-function M.execute(buf, state, shape, direction, context)
+function M.execute(buf, state, shape, direction, context, region)
   local delta = canvas.directions[direction]
   local delta_row = delta.row
   local delta_col = delta.col
 
-  if not M.validate(buf, state, shape, delta_row, delta_col) then
+  if not M.validate(buf, state, shape, delta_row, delta_col, region) then
     return false
   end
 
-  local cells = M.capture_cells(buf, shape)
-  M.erase_cells(buf, shape, context)
-  M.write_cells(buf, cells, delta_row, delta_col, context)
+  local cells = M.capture_cells(buf, shape, region)
+  M.erase_cells(buf, shape, context, region)
+  M.write_cells(buf, cells, delta_row, delta_col, context, region)
   M.update_metadata(shape, delta_row, delta_col)
 
   return true

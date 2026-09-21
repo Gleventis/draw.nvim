@@ -318,7 +318,8 @@ function M.draw(
   start_row,
   start_col,
   end_row,
-  end_col
+  end_col,
+  region
 )
   local top =
     math.min(
@@ -419,7 +420,8 @@ function M.draw(
   canvas.ensure_col(
     buf,
     bottom,
-    shape.right
+    shape.right,
+    region
   )
 
   -------------------------------------------------------------------
@@ -438,14 +440,16 @@ function M.draw(
       canvas.get_char(
         buf,
         row,
-        left
+        left,
+        region
       )
 
     local right_char =
       canvas.get_char(
         buf,
         row,
-        right
+        right,
+        region
       )
 
     if
@@ -507,7 +511,8 @@ function M.draw(
       buf,
       row,
       left,
-      left_char
+      left_char,
+      region
     )
 
     first_change = false
@@ -518,7 +523,8 @@ function M.draw(
       buf,
       row,
       right,
-      right_char
+      right_char,
+      region
     )
   end
 
@@ -529,9 +535,9 @@ end
 -- Character width of a row (used by the scanner)
 ---------------------------------------------------------------------
 
-local function row_width(buf, row)
+local function row_width(buf, row, region)
   local line =
-    canvas.get_line(buf, row)
+    canvas.get_line(buf, row, region)
 
   return canvas.char_count(line)
 end
@@ -540,14 +546,14 @@ end
 -- Maximum actual line width over a row range
 ---------------------------------------------------------------------
 
-local function widest_row(buf, top, bottom)
+local function widest_row(buf, top, bottom, region)
   local widest = 0
 
   for row = top, bottom do
     widest =
       math.max(
         widest,
-        row_width(buf, row)
+        row_width(buf, row, region)
       )
   end
 
@@ -558,7 +564,7 @@ end
 -- Validate reconstructed diamond against buffer content
 ---------------------------------------------------------------------
 
-local function diamond_matches(buf, shape)
+local function diamond_matches(buf, shape, region)
   for row = shape.top, shape.bottom do
     local left, right, upper =
       outline_for_row(shape, row)
@@ -578,7 +584,8 @@ local function diamond_matches(buf, shape)
       canvas.safe_get_char(
         buf,
         row,
-        left
+        left,
+        region
       ) ~= expected_left
     then
       return false
@@ -588,7 +595,8 @@ local function diamond_matches(buf, shape)
       canvas.safe_get_char(
         buf,
         row,
-        right
+        right,
+        region
       ) ~= expected_right
     then
       return false
@@ -608,12 +616,18 @@ end
 -- rather than orthogonal connector topology.
 ---------------------------------------------------------------------
 
-local function scan_diamonds(buf, results, seen)
+local function scan_diamonds(buf, results, seen, region)
   local line_count =
     vim.api.nvim_buf_line_count(buf)
 
-  for top = 0, line_count - 1 do
-    local width = row_width(buf, top)
+  local top_limit =
+    region and region.top_row or 0
+
+  local bottom_limit =
+    region and region.bottom_row or (line_count - 1)
+
+  for top = top_limit, bottom_limit do
+    local width = row_width(buf, top, region)
 
     for center_left = 0, width - 2 do
       local center_right = center_left + 1
@@ -628,13 +642,15 @@ local function scan_diamonds(buf, results, seen)
         canvas.safe_get_char(
           buf,
           top,
-          center_left
+          center_left,
+          region
         ) == "╱"
 
         and canvas.safe_get_char(
           buf,
           top,
-          center_right
+          center_right,
+          region
         ) == "╲"
       then
         ----------------------------------------------------------------
@@ -643,22 +659,24 @@ local function scan_diamonds(buf, results, seen)
         --     ╲╱
         ----------------------------------------------------------------
 
-        for bottom = top + 4, line_count - 1 do
+        for bottom = top + 4, bottom_limit do
           if
             canvas.safe_get_char(
               buf,
               bottom,
-              center_left
+              center_left,
+              region
             ) == "╲"
 
             and canvas.safe_get_char(
               buf,
               bottom,
-              center_right
+              center_right,
+              region
             ) == "╱"
           then
             local widest =
-              widest_row(buf, top, bottom)
+              widest_row(buf, top, bottom, region)
 
             local maximum_expand =
               math.min(
@@ -682,7 +700,7 @@ local function scan_diamonds(buf, results, seen)
                   max_expand
                 )
 
-              if diamond_matches(buf, shape) then
+              if diamond_matches(buf, shape, region) then
                 local key =
                   table.concat(
                     {
@@ -724,8 +742,8 @@ end
 -- without hard-coding the scanner inside discovery.lua.
 ---------------------------------------------------------------------
 
-discovery.register(function(buf, results, seen)
-  scan_diamonds(buf, results, seen)
+discovery.register(function(buf, results, seen, region)
+  scan_diamonds(buf, results, seen, region)
 end)
 
 return M

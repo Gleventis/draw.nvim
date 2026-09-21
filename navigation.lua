@@ -342,7 +342,8 @@ end
 
 function M.jump(
   state,
-  direction
+  direction,
+  region
 )
   if state == nil then
     return
@@ -370,7 +371,7 @@ function M.jump(
   end
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local target =
     M.find_target(
@@ -399,7 +400,8 @@ function M.jump(
   canvas.set_cursor(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 end
 

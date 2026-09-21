@@ -34,9 +34,12 @@ function M.delete_shape(state)
   local buf =
     state.buf
 
+  local region =
+    state.region
+
   local row,
     col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   -------------------------------------------------------------------
   -- Find current shape
@@ -108,7 +111,8 @@ function M.delete_shape(state)
           buf,
           current_row,
           current_col,
-          " "
+          " ",
+          region
         )
 
         first_change =
@@ -141,7 +145,8 @@ function M.delete_shape(state)
   canvas.set_cursor(
     buf,
     row,
-    col
+    col,
+    region
   )
 
   vim.notify(

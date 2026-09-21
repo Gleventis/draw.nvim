@@ -6,7 +6,7 @@ local topology =
 
 local M = {}
 
-function M.draw(direction)
+function M.draw(direction, region)
   local buf =
     vim.api.nvim_get_current_buf()
 
@@ -14,7 +14,7 @@ function M.draw(direction)
     canvas.directions[direction]
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local target_row =
     row + delta.row
@@ -32,27 +32,31 @@ function M.draw(direction)
   canvas.ensure_col(
     buf,
     row,
-    col
+    col,
+    region
   )
 
   canvas.ensure_col(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 
   local current_char =
     canvas.get_char(
       buf,
       row,
-      col
+      col,
+      region
     )
 
   local target_char =
     canvas.get_char(
       buf,
       target_row,
-      target_col
+      target_col,
+      region
     )
 
   local current_connections =
@@ -76,7 +80,8 @@ function M.draw(direction)
     canvas.set_cursor(
       buf,
       target_row,
-      target_col
+      target_col,
+      region
     )
 
     return
@@ -98,7 +103,8 @@ function M.draw(direction)
     col,
     topology.to_char(
       current_connections
-    )
+    ),
+    region
   )
 
   canvas.undo_join()
@@ -109,13 +115,15 @@ function M.draw(direction)
     target_col,
     topology.to_char(
       target_connections
-    )
+    ),
+    region
   )
 
   canvas.set_cursor(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 end
 

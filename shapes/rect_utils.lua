@@ -25,7 +25,8 @@ function M.validate_rectangular_perimeter(
   top,
   bottom,
   left,
-  right
+  right,
+  region
 )
   for row = top, bottom do
     for col = left, right do
@@ -40,7 +41,8 @@ function M.validate_rectangular_perimeter(
           canvas.get_char(
             buf,
             row,
-            col
+            col,
+            region
           )
 
         if arrows.is_arrowhead(char) then
@@ -122,7 +124,8 @@ function M.draw_rectangular_perimeter(
   bottom,
   left,
   right,
-  corner_renderer
+  corner_renderer,
+  region
 )
   local first_change = true
 
@@ -139,7 +142,8 @@ function M.draw_rectangular_perimeter(
           canvas.get_char(
             buf,
             row,
-            col
+            col,
+            region
           )
 
         local connections =
@@ -185,7 +189,8 @@ function M.draw_rectangular_perimeter(
             right,
             current_char,
             connections
-          )
+          ),
+          region
         )
 
         first_change = false

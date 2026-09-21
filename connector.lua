@@ -454,17 +454,20 @@ local function cells_connected(
   buf,
   from,
   to,
-  direction
+  direction,
+  region
 )
   local from_char =
     canvas.safe_get_char(buf,
     from.row,
-    from.col)
+    from.col,
+    region)
 
   local to_char =
     canvas.safe_get_char(buf,
     to.row,
-    to.col)
+    to.col,
+    region)
 
   local from_connections =
     topology.from_char(
@@ -503,14 +506,16 @@ end
 local function reachable_topology(
   buf,
   start_row,
-  start_col
+  start_col,
+  region
 )
   local visited = {}
 
   local start_char =
     canvas.safe_get_char(buf,
     start_row,
-    start_col)
+    start_col,
+    region)
 
   local start_connections =
     topology.from_char(
@@ -551,7 +556,8 @@ local function reachable_topology(
     local current_char =
       canvas.safe_get_char(buf,
       current.row,
-      current.col)
+      current.col,
+      region)
 
     local connections =
       topology.from_char(
@@ -599,7 +605,8 @@ local function reachable_topology(
                   buf,
                   current,
                   next_cell,
-                  direction
+                  direction,
+                  region
                 )
               then
                 visited[key] =
@@ -645,7 +652,8 @@ local function find_reverse_connection(
   buf,
   source,
   target,
-  direction
+  direction,
+  region
 )
   local source_side =
     direction
@@ -693,7 +701,8 @@ local function find_reverse_connection(
     local source_char =
       canvas.safe_get_char(buf,
       source_cell.row,
-      source_cell.col)
+      source_cell.col,
+      region)
 
     if
       source_char
@@ -715,7 +724,8 @@ local function find_reverse_connection(
         reachable_topology(
           buf,
           start_row,
-          start_col
+          start_col,
+          region
         )
 
       ----------------------------------------------------------------
@@ -728,7 +738,8 @@ local function find_reverse_connection(
         local target_char =
           canvas.safe_get_char(buf,
           target_cell.row,
-          target_cell.col)
+          target_cell.col,
+          region)
 
         --------------------------------------------------------------
         -- Already bidirectional
@@ -806,7 +817,8 @@ end
 local function upgrade_reverse_connector(
   buf,
   target_cell,
-  direction
+  direction,
+  region
 )
   canvas.set_char(
     buf,
@@ -814,7 +826,8 @@ local function upgrade_reverse_connector(
     target_cell.col,
     arrows.arrowheads[
       direction
-    ]
+    ],
+    region
   )
 end
 
@@ -827,7 +840,8 @@ local function validate_new_path(
   state,
   source,
   target,
-  path
+  path,
+  region
 )
   -------------------------------------------------------------------
   -- Bounds and other shapes
@@ -870,7 +884,8 @@ local function validate_new_path(
   local final_char =
     canvas.safe_get_char(buf,
     final.row,
-    final.col)
+    final.col,
+    region)
 
   if
     final_char ~= ""
@@ -892,7 +907,8 @@ local function validate_new_path(
     local char =
       canvas.safe_get_char(buf,
       cell.row,
-      cell.col)
+      cell.col,
+      region)
 
     if
       arrows.is_arrowhead(
@@ -935,7 +951,8 @@ end
 local function draw_path(
   buf,
   path,
-  arrow_direction
+  arrow_direction,
+  region
 )
   if #path == 0 then
     return false
@@ -951,14 +968,16 @@ local function draw_path(
     canvas.ensure_col(
       buf,
       cell.row,
-      cell.col
+      cell.col,
+      region
     )
 
     local char =
       canvas.get_char(
         buf,
         cell.row,
-        cell.col
+        cell.col,
+        region
       )
 
     local connections =
@@ -1020,7 +1039,8 @@ local function draw_path(
       cell.col,
       topology.to_char(
         connections
-      )
+      ),
+      region
     )
 
     first_change =
@@ -1037,7 +1057,8 @@ local function draw_path(
   canvas.ensure_col(
     buf,
     final.row,
-    final.col
+    final.col,
+    region
   )
 
   if not first_change then
@@ -1050,7 +1071,8 @@ local function draw_path(
     final.col,
     arrows.arrowheads[
       arrow_direction
-    ]
+    ],
+    region
   )
 
   return true
@@ -1092,12 +1114,14 @@ local function delete_write(
   row,
   col,
   char,
-  context
+  context,
+  region
 )
   local current =
     canvas.safe_get_char(buf,
     row,
-    col)
+    col,
+    region)
 
   if current == char then
     return
@@ -1111,7 +1135,8 @@ local function delete_write(
     buf,
     row,
     col,
-    char
+    char,
+    region
   )
 
   context.changed =
@@ -1127,7 +1152,8 @@ local function rewrite_topology(
   row,
   col,
   connections,
-  context
+  context,
+  region
 )
   if
     not has_connections(
@@ -1139,7 +1165,8 @@ local function rewrite_topology(
       row,
       col,
       " ",
-      context
+      context,
+      region
     )
 
     return
@@ -1152,7 +1179,8 @@ local function rewrite_topology(
     topology.to_char(
       connections
     ),
-    context
+    context,
+    region
   )
 end
 
@@ -1178,7 +1206,8 @@ local function prune_branch(
   start_row,
   start_col,
   incoming_direction,
-  context
+  context,
+  region
 )
   local row =
     start_row
@@ -1208,7 +1237,8 @@ local function prune_branch(
     local char =
       canvas.safe_get_char(buf,
       row,
-      col)
+      col,
+      region)
 
     -----------------------------------------------------------------
     -- Arrowhead = connector endpoint
@@ -1220,7 +1250,8 @@ local function prune_branch(
         row,
         col,
         " ",
-        context
+        context,
+        region
       )
 
       return
@@ -1266,7 +1297,8 @@ local function prune_branch(
         row,
         col,
         " ",
-        context
+        context,
+        region
       )
 
       return
@@ -1297,7 +1329,8 @@ local function prune_branch(
         row,
         col,
         connections,
-        context
+        context,
+        region
       )
 
       return
@@ -1343,7 +1376,8 @@ local function prune_branch(
     local next_char =
       canvas.safe_get_char(buf,
       next_row,
-      next_col)
+      next_col,
+      region)
 
     -----------------------------------------------------------------
     -- Current cell belongs exclusively to the branch being deleted.
@@ -1354,7 +1388,8 @@ local function prune_branch(
       row,
       col,
       " ",
-      context
+      context,
+      region
     )
 
     -----------------------------------------------------------------
@@ -1371,7 +1406,8 @@ local function prune_branch(
         next_row,
         next_col,
         " ",
-        context
+        context,
+        region
       )
 
       return
@@ -1413,7 +1449,8 @@ local function delete_side_connectors(
   buf,
   shape,
   side,
-  context
+  context,
+  region
 )
   local candidates =
     shape.outside_cells(
@@ -1459,7 +1496,8 @@ local function delete_side_connectors(
     local char =
       canvas.safe_get_char(buf,
       row,
-      col)
+      col,
+      region)
 
     -----------------------------------------------------------------
     -- Connector ends at this shape.
@@ -1471,7 +1509,8 @@ local function delete_side_connectors(
         row,
         col,
         " ",
-        context
+        context,
+        region
       )
 
       local start_row =
@@ -1485,7 +1524,8 @@ local function delete_side_connectors(
         start_row,
         start_col,
         inward,
-        context
+        context,
+        region
       )
 
     else
@@ -1512,7 +1552,8 @@ local function delete_side_connectors(
           row,
           col,
           inward,
-          context
+          context,
+          region
         )
 
       elseif
@@ -1535,7 +1576,8 @@ local function delete_side_connectors(
         local legacy_char =
           canvas.safe_get_char(buf,
           legacy_row,
-          legacy_col)
+          legacy_col,
+          region)
 
         if
           legacy_char
@@ -1546,7 +1588,8 @@ local function delete_side_connectors(
             legacy_row,
             legacy_col,
             " ",
-            context
+            context,
+            region
           )
 
           prune_branch(
@@ -1556,7 +1599,8 @@ local function delete_side_connectors(
             legacy_col
               + outward.col,
             inward,
-            context
+            context,
+            region
           )
 
         else
@@ -1578,7 +1622,8 @@ local function delete_side_connectors(
               legacy_row,
               legacy_col,
               inward,
-              context
+              context,
+              region
             )
           end
         end
@@ -1593,7 +1638,8 @@ end
 
 function M.delete_attached(
   state,
-  shape
+  shape,
+  region
 )
   if
     state == nil
@@ -1619,7 +1665,8 @@ function M.delete_attached(
       buf,
       shape,
       side,
-      context
+      context,
+      region
     )
   end
 
@@ -1643,7 +1690,8 @@ function M.route_between(
   source,
   target,
   direction,
-  bidirectional
+  bidirectional,
+  region
 )
   local start_row,
     start_col =
@@ -1689,7 +1737,8 @@ function M.route_between(
       state,
       source,
       target,
-      path
+      path,
+      region
     )
 
   if not valid then
@@ -1700,7 +1749,8 @@ function M.route_between(
     draw_path(
       buf,
       path,
-      direction
+      direction,
+      region
     )
 
   if not success then
@@ -1718,7 +1768,8 @@ function M.route_between(
       start_col,
       arrows.arrowheads[
         canvas.directions[direction].opposite
-      ]
+      ],
+      region
     )
   end
 
@@ -1731,7 +1782,8 @@ end
 
 function M.connect(
   state,
-  direction
+  direction,
+  region
 )
   if state == nil then
     return
@@ -1753,7 +1805,7 @@ function M.connect(
 
   local row,
     col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   -------------------------------------------------------------------
   -- Source
@@ -1809,7 +1861,8 @@ function M.connect(
       buf,
       source,
       target,
-      direction
+      direction,
+      region
     )
 
   if
@@ -1830,7 +1883,8 @@ function M.connect(
     upgrade_reverse_connector(
       buf,
       reverse_endpoint,
-      direction
+      direction,
+      region
     )
 
     -------------------------------------------------------------------
@@ -1885,7 +1939,8 @@ function M.connect(
       source,
       target,
       direction,
-      false
+      false,
+      region
     )
 
   if not success then
@@ -2002,7 +2057,8 @@ end
 ---------------------------------------------------------------------
 
 function M.rediscover_meta(
-  state
+  state,
+  region
 )
   state.connectors = {}
 
@@ -2033,7 +2089,8 @@ function M.rediscover_meta(
           canvas.safe_get_char(
             buf,
             start_cell.row,
-            start_cell.col
+            start_cell.col,
+            region
           )
 
         local conn =
@@ -2048,7 +2105,8 @@ function M.rediscover_meta(
             reachable_topology(
               buf,
               start_cell.row,
-              start_cell.col
+              start_cell.col,
+              region
             )
 
           for _, tgt
@@ -2067,7 +2125,8 @@ function M.rediscover_meta(
                   canvas.safe_get_char(
                     buf,
                     tgt_cell.row,
-                    tgt_cell.col
+                    tgt_cell.col,
+                    region
                   )
 
                 if
@@ -2126,7 +2185,8 @@ function M.rediscover_meta(
           canvas.safe_get_char(
             buf,
             end_cell.row,
-            end_cell.col
+            end_cell.col,
+            region
           )
 
         if
@@ -2145,7 +2205,8 @@ function M.rediscover_meta(
             reachable_topology(
               buf,
               beyond_row,
-              beyond_col
+              beyond_col,
+              region
             )
 
           for _, source_shape
@@ -2166,7 +2227,8 @@ function M.rediscover_meta(
                   canvas.safe_get_char(
                     buf,
                     source_cell.row,
-                    source_cell.col
+                    source_cell.col,
+                    region
                   )
 
                 local source_conn =

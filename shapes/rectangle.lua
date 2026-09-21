@@ -105,7 +105,8 @@ function M.draw(
   start_row,
   start_col,
   end_row,
-  end_col
+  end_col,
+  region
 )
   local top =
     math.min(
@@ -146,7 +147,8 @@ function M.draw(
   canvas.ensure_col(
     buf,
     bottom,
-    right
+    right,
+    region
   )
 
   -------------------------------------------------------------------
@@ -159,7 +161,8 @@ function M.draw(
       top,
       bottom,
       left,
-      right
+      right,
+      region
     )
 
   if not ok then
@@ -179,7 +182,8 @@ function M.draw(
     right,
     function(_row, _col, _t, _b, _l, _r, _char, connections)
       return topology.to_char(connections)
-    end
+    end,
+    region
   )
 
   -------------------------------------------------------------------

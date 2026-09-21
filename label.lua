@@ -57,7 +57,7 @@ end
 -- Materialize writable rows
 ---------------------------------------------------------------------
 
-local function materialize_shape(buf, shape)
+local function materialize_shape(buf, shape, region)
   for row =
     shape.top + 1,
     shape.bottom - 1
@@ -72,7 +72,8 @@ local function materialize_shape(buf, shape)
       canvas.ensure_col(
         buf,
         row,
-        right
+        right,
+        region
       )
     end
   end
@@ -146,14 +147,16 @@ local function clear_range(
   buf,
   row,
   start_col,
-  end_col
+  end_col,
+  region
 )
   for col = start_col, end_col do
     canvas.set_char(
       buf,
       row,
       col,
-      " "
+      " ",
+      region
     )
   end
 end
@@ -166,14 +169,16 @@ local function write_chars(
   buf,
   row,
   start_col,
-  chars
+  chars,
+  region
 )
   for index, char in ipairs(chars) do
     canvas.set_char(
       buf,
       row,
       start_col + index - 1,
-      char
+      char,
+      region
     )
   end
 end
@@ -186,7 +191,8 @@ local function trailing_word(
   buf,
   row,
   start_col,
-  end_col
+  end_col,
+  region
 )
   local col =
     end_col
@@ -196,7 +202,8 @@ local function trailing_word(
       canvas.get_char(
         buf,
         row,
-        col
+        col,
+        region
       )
 
     if char == "" or char == " " then
@@ -225,7 +232,8 @@ local function trailing_word(
       canvas.get_char(
         buf,
         row,
-        current_col
+        current_col,
+        region
       )
     )
   end
@@ -239,7 +247,7 @@ end
 -- Enter
 ---------------------------------------------------------------------
 
-local function newline(buf, state)
+local function newline(buf, state, region)
   local label =
     state.label
 
@@ -250,7 +258,7 @@ local function newline(buf, state)
   local row =
     select(
       1,
-      canvas.current_position()
+      canvas.current_position(region)
     )
 
   local target_row =
@@ -276,7 +284,8 @@ local function newline(buf, state)
   canvas.set_cursor(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 end
 
@@ -284,7 +293,7 @@ end
 -- Backspace
 ---------------------------------------------------------------------
 
-local function backspace(buf, state)
+local function backspace(buf, state, region)
   local label =
     state.label
 
@@ -293,7 +302,7 @@ local function backspace(buf, state)
   end
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local left, right =
     shapes.row_bounds(
@@ -319,13 +328,15 @@ local function backspace(buf, state)
     buf,
     row,
     target_col,
-    " "
+    " ",
+    region
   )
 
   canvas.set_cursor(
     buf,
     row,
-    target_col
+    target_col,
+    region
   )
 end
 
@@ -333,7 +344,7 @@ end
 -- Delete
 ---------------------------------------------------------------------
 
-local function delete_current(buf, state)
+local function delete_current(buf, state, region)
   local label =
     state.label
 
@@ -342,7 +353,7 @@ local function delete_current(buf, state)
   end
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local left, right =
     shapes.row_bounds(
@@ -362,13 +373,15 @@ local function delete_current(buf, state)
     buf,
     row,
     col,
-    " "
+    " ",
+    region
   )
 
   canvas.set_cursor(
     buf,
     row,
-    col
+    col,
+    region
   )
 end
 
@@ -380,7 +393,8 @@ local function character_wrap(
   buf,
   state,
   char,
-  target_row
+  target_row,
+  region
 )
   local label =
     state.label
@@ -418,7 +432,8 @@ local function character_wrap(
       buf,
       target_row,
       target_col,
-      char
+      char,
+      region
     )
 
     canvas.set_cursor(
@@ -427,7 +442,8 @@ local function character_wrap(
       math.min(
         target_col + 1,
         right + 1
-      )
+      ),
+      region
     )
   end)
 end
@@ -436,7 +452,7 @@ end
 -- Word wrapping
 ---------------------------------------------------------------------
 
-local function handle_wrap(buf, state)
+local function handle_wrap(buf, state, region)
   if
     state.mode ~= "label"
     or state.label == nil
@@ -451,7 +467,7 @@ local function handle_wrap(buf, state)
     label.shape
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local left, right =
     shapes.row_bounds(
@@ -532,7 +548,8 @@ local function handle_wrap(buf, state)
         canvas.set_cursor(
           buf,
           target_row,
-          target_start
+          target_start,
+          region
         )
       end
     end)
@@ -559,7 +576,8 @@ local function handle_wrap(buf, state)
       buf,
       row,
       current_start,
-      right
+      right,
+      region
     )
 
   -------------------------------------------------------------------
@@ -571,7 +589,8 @@ local function handle_wrap(buf, state)
       buf,
       state,
       incoming_char,
-      target_row
+      target_row,
+      region
     )
 
     return
@@ -596,7 +615,8 @@ local function handle_wrap(buf, state)
       buf,
       state,
       incoming_char,
-      target_row
+      target_row,
+      region
     )
 
     return
@@ -619,14 +639,16 @@ local function handle_wrap(buf, state)
       buf,
       row,
       word_start,
-      right
+      right,
+      region
     )
 
     write_chars(
       buf,
       target_row,
       target_start,
-      word_chars
+      word_chars,
+      region
     )
 
     local incoming_col =
@@ -637,7 +659,8 @@ local function handle_wrap(buf, state)
       buf,
       target_row,
       incoming_col,
-      incoming_char
+      incoming_char,
+      region
     )
 
     canvas.set_cursor(
@@ -646,7 +669,8 @@ local function handle_wrap(buf, state)
       math.min(
         incoming_col + 1,
         target_right + 1
-      )
+      ),
+      region
     )
   end)
 end
@@ -678,8 +702,11 @@ function M.start(buf, state)
     return
   end
 
+  local region =
+    state.region
+
   local row, col =
-    canvas.current_position()
+    canvas.current_position(region)
 
   local shape =
     shapes.find_containing(
@@ -699,7 +726,8 @@ function M.start(buf, state)
 
   materialize_shape(
     buf,
-    shape
+    shape,
+    region
   )
 
   state.mode =
@@ -761,7 +789,8 @@ function M.start(buf, state)
     function()
       newline(
         buf,
-        state
+        state,
+        region
       )
     end,
     {
@@ -777,7 +806,8 @@ function M.start(buf, state)
     function()
       backspace(
         buf,
-        state
+        state,
+        region
       )
     end,
     {
@@ -793,7 +823,8 @@ function M.start(buf, state)
     function()
       delete_current(
         buf,
-        state
+        state,
+        region
       )
     end,
     {
@@ -812,7 +843,8 @@ function M.start(buf, state)
       callback = function()
         handle_wrap(
           buf,
-          state
+          state,
+          region
         )
       end,
     }

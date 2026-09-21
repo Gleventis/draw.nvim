@@ -43,6 +43,9 @@ local connector =
 local move =
   require "draw.move"
 
+local region_module =
+  require "draw.region"
+
 local M = {}
 
 local states = {}
@@ -122,7 +125,8 @@ local function rediscover_shapes(
 
   local discovered_shapes =
     discovery.scan(
-      state.buf
+      state.buf,
+      state.region
     )
 
   for _, shape
@@ -156,7 +160,7 @@ local function handle_arrow(direction)
   -------------------------------------------------------------------
 
   if state.mode == "erase" then
-    erase.move(direction)
+    erase.move(direction, state.region)
     return
   end
 
@@ -182,7 +186,8 @@ local function handle_arrow(direction)
         state,
         state.move.shape,
         direction,
-        state.move
+        state.move,
+        state.region
       )
 
     if ok then
@@ -190,12 +195,13 @@ local function handle_arrow(direction)
         canvas.directions[direction]
 
       local row, col =
-        canvas.current_position()
+        canvas.current_position(state.region)
 
       canvas.set_cursor(
         buf,
         row + delta.row,
-        col + delta.col
+        col + delta.col,
+        state.region
       )
     end
 
@@ -206,7 +212,7 @@ local function handle_arrow(direction)
   -- DRAW
   -------------------------------------------------------------------
 
-  line.draw(direction)
+  line.draw(direction, state.region)
 end
 
 ---------------------------------------------------------------------
@@ -291,18 +297,20 @@ local function toggle_erase()
   -------------------------------------------------------------------
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(state.region)
 
   erase.at(
     buf,
     row,
-    col
+    col,
+    state.region
   )
 
   canvas.set_cursor(
     buf,
     row,
-    col
+    col,
+    state.region
   )
 
   vim.notify("-- ERASE --")
@@ -355,7 +363,7 @@ local function toggle_shape(kind)
 
   if state.mode ~= "box" then
     local row, col =
-      canvas.current_position()
+      canvas.current_position(state.region)
 
     state.box_start = {
       row = row,
@@ -424,7 +432,7 @@ local function toggle_shape(kind)
 
   local end_row,
     end_col =
-    canvas.current_position()
+    canvas.current_position(state.region)
 
   local start =
     state.box_start
@@ -449,7 +457,8 @@ local function toggle_shape(kind)
       start.row,
       start.col,
       end_row,
-      end_col
+      end_col,
+      state.region
     )
 
   if not success then
@@ -490,7 +499,8 @@ local function toggle_shape(kind)
   canvas.set_cursor(
     buf,
     entry_row,
-    entry_col
+    entry_col,
+    state.region
   )
 
   vim.notify("-- DRAW --")
@@ -584,7 +594,8 @@ local function jump_shape(direction)
 
   navigation.jump(
     state,
-    direction
+    direction,
+    state.region
   )
 end
 
@@ -611,7 +622,8 @@ local function connect_shape(direction)
 
   connector.connect(
     state,
-    direction
+    direction,
+    state.region
   )
 end
 
@@ -733,7 +745,8 @@ local function toggle_move()
             source,
             target,
             entry.direction,
-            entry.bidirectional
+            entry.bidirectional,
+            state.region
           )
 
         if ok then
@@ -799,7 +812,7 @@ local function toggle_move()
   -------------------------------------------------------------------
 
   local row, col =
-    canvas.current_position()
+    canvas.current_position(state.region)
 
   local shape =
     shapes.find_containing(
@@ -834,7 +847,8 @@ local function toggle_move()
   local had_changes =
     connector.delete_attached(
       state,
-      shape
+      shape,
+      state.region
     )
 
   connector.remove_meta_for_shape(
@@ -1068,7 +1082,7 @@ end
 -- Start Draw mode
 ---------------------------------------------------------------------
 
-function M.start()
+function M.start(region_arg)
   local buf =
     vim.api.nvim_get_current_buf()
 
@@ -1132,6 +1146,12 @@ function M.start()
     -----------------------------------------------------------------
 
     connectors = {},
+
+    -----------------------------------------------------------------
+    -- SafeDraw region (nil = normal Draw mode)
+    -----------------------------------------------------------------
+
+    region = region_arg,
   }
 
   states[buf] =
@@ -1142,7 +1162,7 @@ function M.start()
   -------------------------------------------------------------------
 
   local discovered_shapes =
-    discovery.scan(buf)
+    discovery.scan(buf, state.region)
 
   for _, shape
     in ipairs(discovered_shapes)
@@ -1403,7 +1423,8 @@ function M.start()
         arrows.place(
           buf,
           state,
-          dir
+          dir,
+          state.region
         )
       end
     )
@@ -1454,6 +1475,56 @@ function M.toggle()
 end
 
 ---------------------------------------------------------------------
+-- Start SafeDraw mode
+--
+-- Detects the comment block around the cursor, stores the region in
+-- state, and enters Draw mode with that region active. All canvas
+-- operations will strip/restore the comment prefix transparently.
+--
+-- Aborts with a notification when:
+--   - the file extension is unsupported
+--   - the cursor is not inside a comment line
+---------------------------------------------------------------------
+
+function M.start_safe()
+  local buf =
+    vim.api.nvim_get_current_buf()
+
+  if states[buf] ~= nil then
+    return
+  end
+
+  local r, err =
+    region_module.create(buf)
+
+  if r == nil then
+    vim.notify(
+      "SafeDraw: " .. err,
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  M.start(r)
+end
+
+---------------------------------------------------------------------
+-- Toggle SafeDraw
+---------------------------------------------------------------------
+
+function M.toggle_safe()
+  local buf =
+    vim.api.nvim_get_current_buf()
+
+  if states[buf] then
+    M.stop()
+  else
+    M.start_safe()
+  end
+end
+
+---------------------------------------------------------------------
 -- Setup
 ---------------------------------------------------------------------
 
@@ -1465,6 +1536,16 @@ function M.setup()
     end,
     {
       desc = "Toggle Draw mode",
+    }
+  )
+
+  vim.api.nvim_create_user_command(
+    "SafeDraw",
+    function()
+      M.toggle_safe()
+    end,
+    {
+      desc = "Toggle SafeDraw mode (inside comment blocks)",
     }
   )
 end
