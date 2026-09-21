@@ -107,6 +107,29 @@ function M.get_char(buf, row, col)
   )
 end
 
+-- Non-mutating read: returns "" for out-of-bounds without extending the buffer.
+function M.safe_get_char(buf, row, col)
+  if row < 0 or col < 0 then
+    return ""
+  end
+
+  local line_count =
+    vim.api.nvim_buf_line_count(buf)
+
+  if row >= line_count then
+    return ""
+  end
+
+  local line =
+    M.get_line(buf, row)
+
+  if col >= M.char_count(line) then
+    return ""
+  end
+
+  return vim.fn.strcharpart(line, col, 1)
+end
+
 function M.set_char(buf, row, col, value)
   M.ensure_col(buf, row, col)
 
