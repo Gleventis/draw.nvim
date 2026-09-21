@@ -126,6 +126,11 @@ function M.delete_shape(state)
     shape
   )
 
+  connector.remove_meta_for_shape(
+    state,
+    shape.id
+  )
+
   -------------------------------------------------------------------
   -- Keep the cursor where it was.
   --

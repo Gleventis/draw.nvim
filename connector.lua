@@ -1627,6 +1627,105 @@ function M.delete_attached(
 end
 
 ---------------------------------------------------------------------
+-- Route a new connector between two shapes
+--
+-- Computes anchors, builds the path, validates, draws, and
+-- optionally places a reverse arrowhead for bidirectional
+-- connections.  Does NOT update metadata — that is the caller's
+-- responsibility.
+--
+-- Returns true on success, or false + reason string on failure.
+---------------------------------------------------------------------
+
+function M.route_between(
+  buf,
+  state,
+  source,
+  target,
+  direction,
+  bidirectional
+)
+  local start_row,
+    start_col =
+    outside_anchor(
+      source,
+      direction
+    )
+
+  local target_side =
+    canvas.directions[direction].opposite
+
+  local end_row,
+    end_col =
+    outside_anchor(
+      target,
+      target_side
+    )
+
+  if
+    start_row == nil
+    or start_col == nil
+    or end_row == nil
+    or end_col == nil
+  then
+    return
+      false,
+      "Could not calculate connector anchors"
+  end
+
+  local path =
+    build_path(
+      direction,
+      start_row,
+      start_col,
+      end_row,
+      end_col
+    )
+
+  local valid,
+    reason =
+    validate_new_path(
+      buf,
+      state,
+      source,
+      target,
+      path
+    )
+
+  if not valid then
+    return false, reason
+  end
+
+  local success =
+    draw_path(
+      buf,
+      path,
+      direction
+    )
+
+  if not success then
+    return
+      false,
+      "Failed to draw connector path"
+  end
+
+  if bidirectional then
+    canvas.undo_join()
+
+    canvas.set_char(
+      buf,
+      start_row,
+      start_col,
+      arrows.arrowheads[
+        canvas.directions[direction].opposite
+      ]
+    )
+  end
+
+  return true
+end
+
+---------------------------------------------------------------------
 -- Public connector
 ---------------------------------------------------------------------
 
@@ -1734,6 +1833,39 @@ function M.connect(
       direction
     )
 
+    -------------------------------------------------------------------
+    -- Update metadata: mark the existing reverse entry bidirectional.
+    -- If not found (e.g. after undo), add a new bidirectional entry.
+    -------------------------------------------------------------------
+
+    local found = false
+
+    for _, entry
+      in ipairs(state.connectors)
+    do
+      if
+        entry.source_id == target.id
+        and entry.target_id == source.id
+      then
+        entry.bidirectional =
+          true
+
+        found = true
+
+        break
+      end
+    end
+
+    if not found then
+      M.add_meta(
+        state,
+        source.id,
+        target.id,
+        direction,
+        true
+      )
+    end
+
     vim.notify(
       "-- CONNECTED --"
     )
@@ -1745,57 +1877,18 @@ function M.connect(
   -- Otherwise build a brand-new connector.
   -------------------------------------------------------------------
 
-  local start_row,
-    start_col =
-    outside_anchor(
-      source,
-      direction
-    )
-
-  local target_side =
-    canvas.directions[direction].opposite
-
-  local end_row,
-    end_col =
-    outside_anchor(
-      target,
-      target_side
-    )
-
-  if
-    start_row == nil
-    or start_col == nil
-    or end_row == nil
-    or end_col == nil
-  then
-    vim.notify(
-      "Could not calculate connector anchors",
-      vim.log.levels.WARN
-    )
-
-    return
-  end
-
-  local path =
-    build_path(
-      direction,
-      start_row,
-      start_col,
-      end_row,
-      end_col
-    )
-
-  local valid,
+  local success,
     reason =
-    validate_new_path(
+    M.route_between(
       buf,
       state,
       source,
       target,
-      path
+      direction,
+      false
     )
 
-  if not valid then
+  if not success then
     vim.notify(
       reason,
       vim.log.levels.WARN
@@ -1804,18 +1897,393 @@ function M.connect(
     return
   end
 
-  local success =
-    draw_path(
-      buf,
-      path,
-      direction
-    )
+  M.add_meta(
+    state,
+    source.id,
+    target.id,
+    direction,
+    false
+  )
 
-  if success then
-    vim.notify(
-      "-- CONNECTED --"
-    )
+  vim.notify(
+    "-- CONNECTED --"
+  )
+end
+
+---------------------------------------------------------------------
+-- Append a connector metadata entry
+---------------------------------------------------------------------
+
+function M.add_meta(
+  state,
+  source_id,
+  target_id,
+  direction,
+  bidirectional
+)
+  table.insert(
+    state.connectors,
+    {
+      source_id = source_id,
+      target_id = target_id,
+      direction = direction,
+      bidirectional = bidirectional,
+    }
+  )
+end
+
+---------------------------------------------------------------------
+-- Remove all metadata entries referencing a shape
+---------------------------------------------------------------------
+
+function M.remove_meta_for_shape(
+  state,
+  shape_id
+)
+  for i = #state.connectors, 1, -1 do
+    local entry =
+      state.connectors[i]
+
+    if
+      entry.source_id == shape_id
+      or entry.target_id == shape_id
+    then
+      table.remove(
+        state.connectors,
+        i
+      )
+    end
   end
+end
+
+---------------------------------------------------------------------
+-- Return all metadata entries where shape is source or target
+---------------------------------------------------------------------
+
+function M.find_meta_for_shape(
+  state,
+  shape_id
+)
+  local result = {}
+
+  for _, entry
+    in ipairs(state.connectors)
+  do
+    if
+      entry.source_id == shape_id
+      or entry.target_id == shape_id
+    then
+      table.insert(
+        result,
+        entry
+      )
+    end
+  end
+
+  return result
+end
+
+---------------------------------------------------------------------
+-- Rebuild connector metadata from buffer topology.
+--
+-- Scans each shape's outside cells for outgoing connectors.
+-- A cell going outward in direction `side` is the source end of a
+-- connector.  BFS via reachable_topology traces it to the arrowhead,
+-- which sits on the target shape's opposite outside cell.
+--
+-- Also scans for incoming connectors.  An arrowhead pointing INTO
+-- the shape is the target end.  Step outward from the arrowhead,
+-- BFS, then find the source shape whose outgoing cell is reachable.
+--
+-- Deduplicates raw results since the same A→B connection is found
+-- by both the outgoing scan on A and the incoming scan on B.
+--
+-- Bidirectional detection is handled separately.
+---------------------------------------------------------------------
+
+function M.rediscover_meta(
+  state
+)
+  state.connectors = {}
+
+  local buf = state.buf
+
+  for _, src in ipairs(state.shapes) do
+    for _, side in ipairs {
+      "left",
+      "right",
+      "up",
+      "down",
+    } do
+      local side_delta =
+        canvas.directions[side]
+
+      local opposite_side =
+        side_delta.opposite
+
+      local back_delta =
+        canvas.directions[opposite_side]
+
+      for _, start_cell
+        in ipairs(
+          src.outside_cells(src, side)
+        )
+      do
+        local char =
+          canvas.safe_get_char(
+            buf,
+            start_cell.row,
+            start_cell.col
+          )
+
+        local conn =
+          topology.from_char(char)
+
+        if
+          conn ~= nil
+          and has_connections(conn)
+          and conn[side]
+        then
+          local visited =
+            reachable_topology(
+              buf,
+              start_cell.row,
+              start_cell.col
+            )
+
+          for _, tgt
+            in ipairs(state.shapes)
+          do
+            if tgt.id ~= src.id then
+              for _, tgt_cell
+                in ipairs(
+                  tgt.outside_cells(
+                    tgt,
+                    opposite_side
+                  )
+                )
+              do
+                local tgt_char =
+                  canvas.safe_get_char(
+                    buf,
+                    tgt_cell.row,
+                    tgt_cell.col
+                  )
+
+                if
+                  tgt_char
+                  == arrows.arrowheads[side]
+                then
+                  local behind_row =
+                    tgt_cell.row
+                    + back_delta.row
+
+                  local behind_col =
+                    tgt_cell.col
+                    + back_delta.col
+
+                  if
+                    visited[
+                      position_key(
+                        behind_row,
+                        behind_col
+                      )
+                    ]
+                  then
+                    M.add_meta(
+                      state,
+                      src.id,
+                      tgt.id,
+                      side,
+                      false
+                    )
+                  end
+                end
+              end
+            end
+          end
+        end
+      end
+
+      ----------------------------------------------------------------
+      -- Incoming scan: arrowheads pointing INTO src on this side.
+      --
+      -- An arrowhead pointing into src sits at src's outside cell
+      -- in direction `side`.  It points toward src, i.e. in the
+      -- `opposite_side` direction.  Step further outward (in `side`)
+      -- to enter the topology and BFS back to the source shape.
+      ----------------------------------------------------------------
+
+      local expected_incoming_arrow =
+        arrows.arrowheads[opposite_side]
+
+      for _, end_cell
+        in ipairs(
+          src.outside_cells(src, side)
+        )
+      do
+        local end_char =
+          canvas.safe_get_char(
+            buf,
+            end_cell.row,
+            end_cell.col
+          )
+
+        if
+          end_char
+          == expected_incoming_arrow
+        then
+          local beyond_row =
+            end_cell.row
+            + side_delta.row
+
+          local beyond_col =
+            end_cell.col
+            + side_delta.col
+
+          local visited =
+            reachable_topology(
+              buf,
+              beyond_row,
+              beyond_col
+            )
+
+          for _, source_shape
+            in ipairs(state.shapes)
+          do
+            if
+              source_shape.id ~= src.id
+            then
+              for _, source_cell
+                in ipairs(
+                  source_shape.outside_cells(
+                    source_shape,
+                    opposite_side
+                  )
+                )
+              do
+                local source_char =
+                  canvas.safe_get_char(
+                    buf,
+                    source_cell.row,
+                    source_cell.col
+                  )
+
+                local source_conn =
+                  topology.from_char(
+                    source_char
+                  )
+
+                if
+                  source_conn ~= nil
+                  and has_connections(
+                    source_conn
+                  )
+                  and source_conn[
+                    opposite_side
+                  ]
+                  and visited[
+                    position_key(
+                      source_cell.row,
+                      source_cell.col
+                    )
+                  ]
+                then
+                  M.add_meta(
+                    state,
+                    source_shape.id,
+                    src.id,
+                    opposite_side,
+                    false
+                  )
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+
+  ----------------------------------------------------------------
+  -- A→B is discovered by both the outgoing scan on A (side=right)
+  -- and the incoming scan on B (side=left).  Keep only the first
+  -- occurrence per (source_id, target_id, direction).
+  ----------------------------------------------------------------
+
+  local seen = {}
+  local deduped = {}
+
+  for _, entry in ipairs(state.connectors) do
+    local key =
+      tostring(entry.source_id)
+      .. ":"
+      .. tostring(entry.target_id)
+      .. ":"
+      .. entry.direction
+
+    if not seen[key] then
+      seen[key] = true
+
+      table.insert(
+        deduped,
+        entry
+      )
+    end
+  end
+
+  ----------------------------------------------------------------
+  -- A bidirectional connector A↔B is discovered as two entries:
+  --   (source=A, target=B, direction=D)
+  --   (source=B, target=A, direction=opposite(D))
+  --
+  -- Merge matching pairs into one entry with bidirectional = true.
+  ----------------------------------------------------------------
+
+  local merged = {}
+  local consumed = {}
+
+  for i, entry in ipairs(deduped) do
+    if not consumed[i] then
+      local reverse_dir =
+        canvas.directions[entry.direction].opposite
+
+      local partner_idx = nil
+
+      for j = i + 1, #deduped do
+        if
+          not consumed[j]
+          and deduped[j].source_id == entry.target_id
+          and deduped[j].target_id == entry.source_id
+          and deduped[j].direction == reverse_dir
+        then
+          partner_idx = j
+          break
+        end
+      end
+
+      if partner_idx ~= nil then
+        consumed[partner_idx] = true
+
+        table.insert(
+          merged,
+          {
+            source_id = entry.source_id,
+            target_id = entry.target_id,
+            direction = entry.direction,
+            bidirectional = true,
+          }
+        )
+      else
+        table.insert(
+          merged,
+          entry
+        )
+      end
+    end
+  end
+
+  state.connectors = merged
 end
 
 return M

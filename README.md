@@ -218,6 +218,16 @@ The current cell is erased immediately. Move using the arrow keys to continue er
 
 Press `x` again to return to DRAW mode.
 
+## Moving shapes
+
+Move the cursor inside a tracked shape and press `m`.
+
+This enters MOVE mode.
+
+In MOVE mode the entire shape moves one cell per arrow key press. Connectors attached to the shape are detached on entry and re-routed when MOVE mode is exited.
+
+Press `m` or `Esc` to exit MOVE mode.
+
 ## Safe deletion
 
 Normal Vim `dd` would delete an entire buffer line, which could destroy unrelated diagram elements.
@@ -286,6 +296,7 @@ No separate metadata file is required.
 | `Backspace`     | Clear the previous character in LABEL mode                  |
 | `Delete`        | Clear the current character in LABEL mode                   |
 | `x`             | Toggle ERASE mode                                           |
+| `m`             | Toggle MOVE mode while inside a shape                       |
 | `dd`            | Clear the writable portion of the current shape row         |
 | `db`            | Delete the entire current shape and its attached connectors |
 | `hb`            | Jump to the nearest shape on the left                       |
@@ -308,7 +319,6 @@ No separate metadata file is required.
 
 Planned next:
 
-* move entire shapes
 * drawing safely inside comments in source files
 * clear all contents of a shape
 * resize shapes

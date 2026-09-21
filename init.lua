@@ -40,6 +40,9 @@ local discovery =
 local connector =
   require "draw.connector"
 
+local move =
+  require "draw.move"
+
 local M = {}
 
 local states = {}
@@ -130,6 +133,10 @@ local function rediscover_shapes(
       shape
     )
   end
+
+  connector.rediscover_meta(
+    state
+  )
 end
 
 ---------------------------------------------------------------------
@@ -165,6 +172,37 @@ local function handle_arrow(direction)
   end
 
   -------------------------------------------------------------------
+  -- MOVE
+  -------------------------------------------------------------------
+
+  if state.mode == "move" then
+    local ok =
+      move.execute(
+        buf,
+        state,
+        state.move.shape,
+        direction,
+        state.move
+      )
+
+    if ok then
+      local delta =
+        canvas.directions[direction]
+
+      local row, col =
+        canvas.current_position()
+
+      canvas.set_cursor(
+        buf,
+        row + delta.row,
+        col + delta.col
+      )
+    end
+
+    return
+  end
+
+  -------------------------------------------------------------------
   -- DRAW
   -------------------------------------------------------------------
 
@@ -180,6 +218,15 @@ local function toggle_erase()
     get_state()
 
   if state == nil then
+    return
+  end
+
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
     return
   end
 
@@ -277,6 +324,15 @@ local function toggle_shape(kind)
     shape_types[kind]
 
   if config == nil then
+    return
+  end
+
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
     return
   end
 
@@ -452,6 +508,11 @@ local function cancel_shape()
     return
   end
 
+  if state.mode == "move" then
+    toggle_move()
+    return
+  end
+
   if state.mode ~= "box" then
     return
   end
@@ -485,6 +546,15 @@ local function start_label()
     return
   end
 
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
   label.start(
     buf,
     state
@@ -503,6 +573,15 @@ local function jump_shape(direction)
     return
   end
 
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
   navigation.jump(
     state,
     direction
@@ -518,6 +597,15 @@ local function connect_shape(direction)
     get_state()
 
   if state == nil then
+    return
+  end
+
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
     return
   end
 
@@ -542,6 +630,15 @@ local function clear_shape_row()
     return
   end
 
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
   edit.clear_row(
     state
   )
@@ -562,9 +659,211 @@ local function delete_shape()
     return
   end
 
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode with m or Esc first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
   deletion.delete_shape(
     state
   )
+end
+
+---------------------------------------------------------------------
+-- Toggle MOVE mode
+--
+-- Enter (from "draw"): snapshot the shape's connectors, erase them
+-- from the buffer and metadata, then set mode to "move".
+--
+-- Exit (from "move"): clear move state, restore draw mode.
+-- Connector re-routing is handled separately (Phase 4).
+---------------------------------------------------------------------
+
+local function toggle_move()
+  local buf, state =
+    get_state()
+
+  if state == nil then
+    return
+  end
+
+  -------------------------------------------------------------------
+  -- Exit MOVE mode
+  -------------------------------------------------------------------
+
+  if state.mode == "move" then
+    -------------------------------------------------------------------
+    -- Re-route attached connectors
+    -------------------------------------------------------------------
+
+    local saved_connectors =
+      state.move.connectors
+
+    local lost = 0
+
+    for _, entry in ipairs(saved_connectors) do
+      local source = nil
+      local target = nil
+
+      for _, s in ipairs(state.shapes) do
+        if s.id == entry.source_id then
+          source = s
+        end
+
+        if s.id == entry.target_id then
+          target = s
+        end
+      end
+
+      if source == nil or target == nil then
+        lost = lost + 1
+      else
+        if state.move.changed then
+          canvas.undo_join()
+        end
+
+        local ok =
+          connector.route_between(
+            buf,
+            state,
+            source,
+            target,
+            entry.direction,
+            entry.bidirectional
+          )
+
+        if ok then
+          state.move.changed = true
+
+          connector.add_meta(
+            state,
+            entry.source_id,
+            entry.target_id,
+            entry.direction,
+            entry.bidirectional
+          )
+        else
+          lost = lost + 1
+        end
+      end
+    end
+
+    if lost > 0 then
+      vim.notify(
+        lost .. " connector(s) could not be re-routed",
+        vim.log.levels.WARN
+      )
+    end
+
+    -------------------------------------------------------------------
+    -- Return to DRAW mode
+    -------------------------------------------------------------------
+
+    state.move =
+      nil
+
+    state.mode =
+      "draw"
+
+    vim.b[buf].draw_submode =
+      "draw"
+
+    vim.notify("-- DRAW --")
+
+    return
+  end
+
+  -------------------------------------------------------------------
+  -- Guard: only available from normal DRAW mode
+  -------------------------------------------------------------------
+
+  if
+    state.mode == "erase"
+    or state.mode == "box"
+    or state.mode == "label"
+  then
+    vim.notify(
+      "Exit current mode first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  -------------------------------------------------------------------
+  -- Find shape under cursor
+  -------------------------------------------------------------------
+
+  local row, col =
+    canvas.current_position()
+
+  local shape =
+    shapes.find_containing(
+      state.shapes,
+      row,
+      col
+    )
+
+  if shape == nil then
+    vim.notify(
+      "Move inside a tracked shape first",
+      vim.log.levels.WARN
+    )
+
+    return
+  end
+
+  -------------------------------------------------------------------
+  -- Snapshot connectors before erasing them
+  -------------------------------------------------------------------
+
+  local connector_snapshot =
+    connector.find_meta_for_shape(
+      state,
+      shape.id
+    )
+
+  -------------------------------------------------------------------
+  -- Erase attached connectors from buffer and remove metadata
+  -------------------------------------------------------------------
+
+  local had_changes =
+    connector.delete_attached(
+      state,
+      shape
+    )
+
+  connector.remove_meta_for_shape(
+    state,
+    shape.id
+  )
+
+  -------------------------------------------------------------------
+  -- Enter MOVE mode
+  -------------------------------------------------------------------
+
+  state.mode =
+    "move"
+
+  state.move = {
+    shape =
+      shape,
+
+    connectors =
+      connector_snapshot,
+
+    changed =
+      had_changes,
+  }
+
+  vim.b[buf].draw_submode =
+    "move"
+
+  vim.notify("-- MOVE --")
 end
 
 ---------------------------------------------------------------------
@@ -579,6 +878,15 @@ local function undo()
     get_state()
 
   if state == nil then
+    return
+  end
+
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode first",
+      vim.log.levels.WARN
+    )
+
     return
   end
 
@@ -608,6 +916,15 @@ local function redo()
     get_state()
 
   if state == nil then
+    return
+  end
+
+  if state.mode == "move" then
+    vim.notify(
+      "Exit MOVE mode first",
+      vim.log.levels.WARN
+    )
+
     return
   end
 
@@ -678,6 +995,14 @@ function M.stop()
 
   if state == nil then
     return
+  end
+
+  -------------------------------------------------------------------
+  -- Exit MOVE mode first so connectors are re-routed.
+  -------------------------------------------------------------------
+
+  if state.mode == "move" then
+    toggle_move()
   end
 
   -------------------------------------------------------------------
@@ -801,6 +1126,12 @@ function M.start()
           win = win,
         }
       ),
+
+    -----------------------------------------------------------------
+    -- Connector metadata
+    -----------------------------------------------------------------
+
+    connectors = {},
   }
 
   states[buf] =
@@ -821,6 +1152,10 @@ function M.start()
       shape
     )
   end
+
+  connector.rediscover_meta(
+    state
+  )
 
   -------------------------------------------------------------------
   -- Canvas behavior
@@ -882,6 +1217,10 @@ function M.start()
       "n",
       "<S-" .. key .. ">",
       function()
+        if state.mode == "move" then
+          return
+        end
+
         canvas.move_only(dir)
       end
     )
@@ -907,6 +1246,17 @@ function M.start()
     "n",
     "x",
     toggle_erase
+  )
+
+  -------------------------------------------------------------------
+  -- MOVE
+  -------------------------------------------------------------------
+
+  map(
+    state,
+    "n",
+    "m",
+    toggle_move
   )
 
   -------------------------------------------------------------------
