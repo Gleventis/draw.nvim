@@ -45,6 +45,35 @@ local M = {}
 local states = {}
 
 ---------------------------------------------------------------------
+-- State accessor
+---------------------------------------------------------------------
+
+local function get_state()
+  local buf =
+    vim.api.nvim_get_current_buf()
+
+  local state =
+    states[buf]
+
+  if state == nil then
+    return
+  end
+
+  return buf, state
+end
+
+---------------------------------------------------------------------
+-- Direction → vim navigation key (hjkl)
+---------------------------------------------------------------------
+
+local nav_keys = {
+  left  = "h",
+  down  = "j",
+  up    = "k",
+  right = "l",
+}
+
+---------------------------------------------------------------------
 -- Shape definitions
 ---------------------------------------------------------------------
 
@@ -108,11 +137,8 @@ end
 ---------------------------------------------------------------------
 
 local function handle_arrow(direction)
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -150,11 +176,8 @@ end
 ---------------------------------------------------------------------
 
 local function toggle_erase()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -243,11 +266,8 @@ end
 ---------------------------------------------------------------------
 
 local function toggle_shape(kind)
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -425,11 +445,8 @@ end
 ---------------------------------------------------------------------
 
 local function cancel_shape()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -461,11 +478,8 @@ end
 ---------------------------------------------------------------------
 
 local function start_label()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -482,11 +496,8 @@ end
 ---------------------------------------------------------------------
 
 local function jump_shape(direction)
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -503,11 +514,8 @@ end
 ---------------------------------------------------------------------
 
 local function connect_shape(direction)
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -527,11 +535,8 @@ end
 ---------------------------------------------------------------------
 
 local function clear_shape_row()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -550,11 +555,8 @@ end
 ---------------------------------------------------------------------
 
 local function delete_shape()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -573,11 +575,8 @@ end
 ---------------------------------------------------------------------
 
 local function undo()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -605,11 +604,8 @@ end
 ---------------------------------------------------------------------
 
 local function redo()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -677,11 +673,8 @@ end
 ---------------------------------------------------------------------
 
 function M.stop()
-  local buf =
-    vim.api.nvim_get_current_buf()
-
-  local state =
-    states[buf]
+  local buf, state =
+    get_state()
 
   if state == nil then
     return
@@ -856,7 +849,7 @@ function M.start()
     "draw"
 
   -------------------------------------------------------------------
-  -- Arrow keys
+  -- Arrow keys / Shift+Arrow
   --
   -- DRAW:
   --     draw
@@ -866,83 +859,33 @@ function M.start()
   --
   -- shape selection:
   --     move only
+  --
+  -- Shift+Arrow: move without drawing in all modes
   -------------------------------------------------------------------
 
-  map(
-    state,
-    "n",
-    "<Left>",
-    function()
-      handle_arrow "left"
-    end
-  )
+  for dir in pairs(canvas.directions) do
+    local key =
+      dir:sub(1, 1):upper()
+      .. dir:sub(2)
 
-  map(
-    state,
-    "n",
-    "<Right>",
-    function()
-      handle_arrow "right"
-    end
-  )
+    map(
+      state,
+      "n",
+      "<" .. key .. ">",
+      function()
+        handle_arrow(dir)
+      end
+    )
 
-  map(
-    state,
-    "n",
-    "<Up>",
-    function()
-      handle_arrow "up"
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "<Down>",
-    function()
-      handle_arrow "down"
-    end
-  )
-
-  -------------------------------------------------------------------
-  -- Shift + Arrow = move only
-  -------------------------------------------------------------------
-
-  map(
-    state,
-    "n",
-    "<S-Left>",
-    function()
-      canvas.move_only "left"
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "<S-Right>",
-    function()
-      canvas.move_only "right"
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "<S-Up>",
-    function()
-      canvas.move_only "up"
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "<S-Down>",
-    function()
-      canvas.move_only "down"
-    end
-  )
+    map(
+      state,
+      "n",
+      "<S-" .. key .. ">",
+      function()
+        canvas.move_only(dir)
+      end
+    )
+  end
 
   -------------------------------------------------------------------
   -- LABEL
@@ -967,49 +910,23 @@ function M.start()
   )
 
   -------------------------------------------------------------------
-  -- RECTANGLE
+  -- Shape creation
   --
-  -- B ... B
+  -- B ... B  (rectangle)
+  -- R ... R  (rounded rectangle)
+  -- D ... D  (diamond)
   -------------------------------------------------------------------
 
-  map(
-    state,
-    "n",
-    "B",
-    function()
-      toggle_shape "rectangle"
-    end
-  )
-
-  -------------------------------------------------------------------
-  -- ROUNDED RECTANGLE
-  --
-  -- R ... R
-  -------------------------------------------------------------------
-
-  map(
-    state,
-    "n",
-    "R",
-    function()
-      toggle_shape "rounded_rectangle"
-    end
-  )
-
-  -------------------------------------------------------------------
-  -- DIAMOND
-  --
-  -- D ... D
-  -------------------------------------------------------------------
-
-  map(
-    state,
-    "n",
-    "D",
-    function()
-      toggle_shape "diamond"
-    end
-  )
+  for kind, config in pairs(shape_types) do
+    map(
+      state,
+      "n",
+      config.key,
+      function()
+        toggle_shape(kind)
+      end
+    )
+  end
 
   -------------------------------------------------------------------
   -- Cancel shape selection
@@ -1031,53 +948,19 @@ function M.start()
   -- lb = right
   -------------------------------------------------------------------
 
-  map(
-    state,
-    "n",
-    "hb",
-    function()
-      jump_shape "left"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "jb",
-    function()
-      jump_shape "down"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "kb",
-    function()
-      jump_shape "up"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "lb",
-    function()
-      jump_shape "right"
-    end,
-    {
-      nowait = false,
-    }
-  )
+  for dir, key in pairs(nav_keys) do
+    map(
+      state,
+      "n",
+      key .. "b",
+      function()
+        jump_shape(dir)
+      end,
+      {
+        nowait = false,
+      }
+    )
+  end
 
   -------------------------------------------------------------------
   -- Smart connectors
@@ -1088,53 +971,19 @@ function M.start()
   -- lc = connect right
   -------------------------------------------------------------------
 
-  map(
-    state,
-    "n",
-    "hc",
-    function()
-      connect_shape "left"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "jc",
-    function()
-      connect_shape "down"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "kc",
-    function()
-      connect_shape "up"
-    end,
-    {
-      nowait = false,
-    }
-  )
-
-  map(
-    state,
-    "n",
-    "lc",
-    function()
-      connect_shape "right"
-    end,
-    {
-      nowait = false,
-    }
-  )
+  for dir, key in pairs(nav_keys) do
+    map(
+      state,
+      "n",
+      key .. "c",
+      function()
+        connect_shape(dir)
+      end,
+      {
+        nowait = false,
+      }
+    )
+  end
 
   -------------------------------------------------------------------
   -- Safe line clearing
@@ -1191,59 +1040,24 @@ function M.start()
 
   -------------------------------------------------------------------
   -- Arrowheads
+  --
+  -- LA = left  RA = right  UA = up  DA = down
   -------------------------------------------------------------------
 
-  map(
-    state,
-    "n",
-    "LA",
-    function()
-      arrows.place(
-        buf,
-        state,
-        "left"
-      )
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "RA",
-    function()
-      arrows.place(
-        buf,
-        state,
-        "right"
-      )
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "UA",
-    function()
-      arrows.place(
-        buf,
-        state,
-        "up"
-      )
-    end
-  )
-
-  map(
-    state,
-    "n",
-    "DA",
-    function()
-      arrows.place(
-        buf,
-        state,
-        "down"
-      )
-    end
-  )
+  for dir in pairs(canvas.directions) do
+    map(
+      state,
+      "n",
+      dir:sub(1, 1):upper() .. "A",
+      function()
+        arrows.place(
+          buf,
+          state,
+          dir
+        )
+      end
+    )
+  end
 
   -------------------------------------------------------------------
   -- Exit Draw mode

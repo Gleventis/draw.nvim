@@ -1,64 +1,98 @@
 local canvas =
   require "draw.canvas"
 
+local discovery =
+  require "draw.discovery"
+
 local topology =
   require "draw.topology"
 
-local arrows =
-  require "draw.arrows"
+local rect_utils =
+  require "draw.shapes.rect_utils"
 
 local M = {}
 
 ---------------------------------------------------------------------
--- Required topology for a perimeter cell
+-- Construct rectangle metadata (no drawing)
+--
+-- Used both when creating a new rectangle and when rediscovering one
+-- from buffer content.  All shape methods are attached here so that
+-- both paths produce identical shape tables.
 ---------------------------------------------------------------------
 
-local function connections_for(
-  row,
-  col,
-  top,
-  bottom,
-  left,
-  right
-)
-  if row == top and col == left then
-    return {
-      down = true,
-      right = true,
-    }
-  end
-
-  if row == top and col == right then
-    return {
-      down = true,
-      left = true,
-    }
-  end
-
-  if row == bottom and col == left then
-    return {
-      up = true,
-      right = true,
-    }
-  end
-
-  if row == bottom and col == right then
-    return {
-      up = true,
-      left = true,
-    }
-  end
-
-  if row == top or row == bottom then
-    return {
-      left = true,
-      right = true,
-    }
-  end
-
+function M.make_shape(top, bottom, left, right)
   return {
-    up = true,
-    down = true,
+    type = "rectangle",
+
+    top = top,
+    bottom = bottom,
+    left = left,
+    right = right,
+
+    -------------------------------------------------------------------
+    -- span(shape, row) → left, right
+    -------------------------------------------------------------------
+    span = function(s, _row)
+      return s.left, s.right
+    end,
+
+    -------------------------------------------------------------------
+    -- on_boundary(shape, row, col) → boolean
+    -------------------------------------------------------------------
+    on_boundary = function(s, row, col)
+      local within =
+        row >= s.top
+        and row <= s.bottom
+        and col >= s.left
+        and col <= s.right
+
+      local edge =
+        row == s.top
+        or row == s.bottom
+        or col == s.left
+        or col == s.right
+
+      return within and edge
+    end,
+
+    -------------------------------------------------------------------
+    -- outside_cells(shape, side) → list of {row, col}
+    -------------------------------------------------------------------
+    outside_cells = function(s, side)
+      local result = {}
+
+      if side == "left" or side == "right" then
+        local col =
+          side == "left"
+          and s.left - 1
+          or s.right + 1
+
+        if col < 0 then
+          return result
+        end
+
+        for row = s.top + 1, s.bottom - 1 do
+          table.insert(result, { row = row, col = col })
+        end
+
+        return result
+      end
+
+      local row =
+        side == "up"
+        and s.top - 1
+        or s.bottom + 1
+
+      if row < 0 then
+        return result
+      end
+
+      for col = s.left + 1, s.right - 1 do
+        table.insert(result, { row = row, col = col })
+      end
+
+      return result
+    end,
   }
 end
 
@@ -119,124 +153,66 @@ function M.draw(
   -- Validate perimeter
   -------------------------------------------------------------------
 
-  for row = top, bottom do
-    for col = left, right do
-      local perimeter =
-        row == top
-        or row == bottom
-        or col == left
-        or col == right
+  local ok, err =
+    rect_utils.validate_rectangular_perimeter(
+      buf,
+      top,
+      bottom,
+      left,
+      right
+    )
 
-      if perimeter then
-        local char =
-          canvas.get_char(
-            buf,
-            row,
-            col
-          )
-
-        if arrows.is_arrowhead(char) then
-          vim.notify(
-            "Cannot draw box over arrowheads",
-            vim.log.levels.WARN
-          )
-
-          return false
-        end
-
-        local connections =
-          topology.from_char(char)
-
-        if connections == nil then
-          vim.notify(
-            "Cannot draw box over normal text",
-            vim.log.levels.WARN
-          )
-
-          return false
-        end
-      end
-    end
+  if not ok then
+    vim.notify(err, vim.log.levels.WARN)
+    return false
   end
 
   -------------------------------------------------------------------
   -- Draw perimeter
   -------------------------------------------------------------------
 
-  local first_change = true
-
-  for row = top, bottom do
-    for col = left, right do
-      local perimeter =
-        row == top
-        or row == bottom
-        or col == left
-        or col == right
-
-      if perimeter then
-        local current_char =
-          canvas.get_char(
-            buf,
-            row,
-            col
-          )
-
-        local connections =
-          topology.from_char(
-            current_char
-          )
-
-        local needed =
-          connections_for(
-            row,
-            col,
-            top,
-            bottom,
-            left,
-            right
-          )
-
-        for direction, enabled
-          in pairs(needed)
-        do
-          if enabled then
-            topology.add(
-              connections,
-              direction
-            )
-          end
-        end
-
-        if not first_change then
-          canvas.undo_join()
-        end
-
-        canvas.set_char(
-          buf,
-          row,
-          col,
-          topology.to_char(
-            connections
-          )
-        )
-
-        first_change = false
-      end
+  rect_utils.draw_rectangular_perimeter(
+    buf,
+    top,
+    bottom,
+    left,
+    right,
+    function(_row, _col, _t, _b, _l, _r, _char, connections)
+      return topology.to_char(connections)
     end
-  end
+  )
 
   -------------------------------------------------------------------
   -- Return metadata describing the shape.
   -------------------------------------------------------------------
 
-  return true, {
-    type = "rectangle",
-
-    top = top,
-    bottom = bottom,
-    left = left,
-    right = right,
-  }
+  return true, M.make_shape(top, bottom, left, right)
 end
+
+---------------------------------------------------------------------
+-- Register with the discovery system
+--
+-- Called at require-time so that discovery.scan() finds rectangles
+-- without hard-coding this scanner inside discovery.lua.
+---------------------------------------------------------------------
+
+discovery.register_rectangular_scanner {
+  type = "rectangle",
+
+  top_left =
+    "┌",
+
+  top_right =
+    "┐",
+
+  bottom_left =
+    "└",
+
+  bottom_right =
+    "┘",
+
+  make_shape =
+    M.make_shape,
+}
 
 return M

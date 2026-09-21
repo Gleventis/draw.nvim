@@ -4,50 +4,10 @@ local canvas =
 local shapes =
   require "draw.shapes"
 
-local diamond =
-  require "draw.shapes.diamond"
-
 local connector = 
   require "draw.connector"
 
 local M = {}
-
----------------------------------------------------------------------
--- Span occupied by a shape on one row
---
--- Returns:
---
---   left, right
---
--- Both values are part of the shape itself.
----------------------------------------------------------------------
-
-local function shape_span(
-  shape,
-  row
-)
-  -------------------------------------------------------------------
-  -- Diamond
-  --
-  -- A diamond does not occupy its entire bounding box.
-  -- Only erase between the actual left/right outline cells.
-  -------------------------------------------------------------------
-
-  if shape.type == "diamond" then
-    return diamond.outline_for_row(
-      shape,
-      row
-    )
-  end
-
-  -------------------------------------------------------------------
-  -- Rectangle / rounded rectangle
-  -------------------------------------------------------------------
-
-  return
-    shape.left,
-    shape.right
-end
 
 ---------------------------------------------------------------------
 -- Delete the shape under the cursor
@@ -127,7 +87,7 @@ function M.delete_shape(state)
   do
     local left,
       right =
-      shape_span(
+      shape.span(
         shape,
         current_row
       )

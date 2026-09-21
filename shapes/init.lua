@@ -1,6 +1,52 @@
 local M = {}
 
 ---------------------------------------------------------------------
+-- Shape contract
+--
+-- Every shape table must contain:
+--
+--   type    string   Shape type name ("rectangle", "rounded_rectangle",
+--                    "diamond", ...). Used for display and discovery.
+--
+--   top     number   Top row of the bounding box (0-indexed).
+--   bottom  number   Bottom row of the bounding box (0-indexed).
+--   left    number   Leftmost column of the bounding box (0-indexed).
+--   right   number   Rightmost column of the bounding box (0-indexed).
+--
+-- Optional methods (called as shape.method(shape, ...)):
+--
+--   writable_bounds(shape, row) -> left, right | nil, nil
+--       Writable interior columns for one row.
+--       Default: left+1..right-1 for rows inside top..bottom.
+--       Override for non-rectangular interiors (e.g. diamonds).
+--
+--   entry_point(shape) -> row, col
+--       Preferred cursor position when entering the shape.
+--       Default: top+1, left+1.
+--
+--   center(shape) -> row, col
+--       Center coordinates for navigation scoring.
+--       Default: midpoint of bounding box.
+--
+--   span(shape, row) -> left, right | nil, nil
+--       All cells owned by the shape on this row (outline + interior).
+--       Used by delete.lua to erase the full shape.
+--
+--   on_boundary(shape, row, col) -> boolean
+--       Whether (row, col) sits on the shape outline.
+--       Used by connector.lua for collision detection.
+--
+--   outside_cells(shape, side) -> { {row, col}, ... }
+--       Cells just outside the shape on the given side
+--       ("left", "right", "up", "down").
+--       Used by connector.lua for anchor and reverse detection.
+--
+-- Shapes are constructed by their renderer's make_shape() function,
+-- which attaches the appropriate methods. Discovery must use the
+-- same make_shape() so rediscovered shapes carry the full interface.
+---------------------------------------------------------------------
+
+---------------------------------------------------------------------
 -- Register shape
 ---------------------------------------------------------------------
 

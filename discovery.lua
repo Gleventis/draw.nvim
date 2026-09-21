@@ -1,47 +1,69 @@
-local canvas =
-  require "draw.canvas"
-
-local diamond =
-  require "draw.shapes.diamond"
-
 local M = {}
 
 ---------------------------------------------------------------------
--- Safe character access
+-- Scanner registry
 ---------------------------------------------------------------------
 
-local function char_at(
-  buf,
-  row,
-  col
-)
-  if row < 0 or col < 0 then
-    return ""
-  end
+local scanners = {}
 
-  local line_count =
-    vim.api.nvim_buf_line_count(buf)
+---------------------------------------------------------------------
+-- Pre-register in package.loaded so circular requires from shape
+-- modules (rectangle → discovery) receive this partial M table
+-- instead of triggering a second load attempt.
+---------------------------------------------------------------------
 
-  if row >= line_count then
-    return ""
-  end
+package.loaded["draw.discovery"] = M
 
-  local line =
-    canvas.get_line(
-      buf,
-      row
-    )
+---------------------------------------------------------------------
+-- Forward declarations
+--
+-- add_result and scan_rectangular are referenced by
+-- M.register_rectangular_scanner before they are assigned below.
+-- Declaring them here creates an upvalue that the closures capture.
+---------------------------------------------------------------------
 
-  if col >= canvas.char_count(line) then
-    return ""
-  end
+local add_result
+local scan_rectangular
 
-  return canvas.get_char(
-    buf,
-    row,
-    col
+---------------------------------------------------------------------
+-- Public API — defined early so shape modules loaded below can call
+-- M.register / M.register_rectangular_scanner at require-time.
+---------------------------------------------------------------------
+
+--- Register a scanner function with the discovery system.
+--
+-- Args:
+--   scan_fn: Function called as scan_fn(buf, results, seen) that
+--            appends discovered shapes via add_result().
+function M.register(scan_fn)
+  table.insert(
+    scanners,
+    scan_fn
   )
 end
+
+--- Register a rectangular scanner using a style descriptor.
+--
+-- Builds the scanner closure around the internal scan_rectangular
+-- function and registers it. Shape modules call this at require-time
+-- to self-register without knowing about scanner internals.
+--
+-- Args:
+--   style: Table with fields type, top_left, top_right, bottom_left,
+--          bottom_right, make_shape (e.g. { type = "rectangle", ... }).
+function M.register_rectangular_scanner(style)
+  M.register(function(buf, results, seen)
+    scan_rectangular(
+      buf,
+      style,
+      results,
+      seen
+    )
+  end)
+end
+
+local canvas =
+  require "draw.canvas"
 
 ---------------------------------------------------------------------
 -- Character width of a row
@@ -77,7 +99,7 @@ local function shape_key(shape)
   )
 end
 
-local function add_result(
+add_result = function(
   results,
   seen,
   shape
@@ -136,7 +158,7 @@ local function strict_horizontal_edge(
     right - 1
   do
     if
-      char_at(
+      canvas.safe_get_char(
         buf,
         row,
         col
@@ -178,7 +200,7 @@ local function strict_vertical_edge(
     bottom - 1
   do
     if
-      char_at(
+      canvas.safe_get_char(
         buf,
         row,
         col
@@ -195,7 +217,7 @@ end
 -- Scan rectangular shapes
 ---------------------------------------------------------------------
 
-local function scan_rectangular(
+scan_rectangular = function(
   buf,
   style,
   results,
@@ -217,7 +239,7 @@ local function scan_rectangular(
       ----------------------------------------------------------------
 
       if
-        char_at(
+        canvas.safe_get_char(
           buf,
           top,
           left
@@ -232,7 +254,7 @@ local function scan_rectangular(
           width - 1
         do
           if
-            char_at(
+            canvas.safe_get_char(
               buf,
               top,
               right
@@ -253,13 +275,13 @@ local function scan_rectangular(
               line_count - 1
             do
               if
-                char_at(
+                canvas.safe_get_char(
                   buf,
                   bottom,
                   left
                 ) == style.bottom_left
 
-                and char_at(
+                and canvas.safe_get_char(
                   buf,
                   bottom,
                   right
@@ -289,22 +311,12 @@ local function scan_rectangular(
                 add_result(
                   results,
                   seen,
-                  {
-                    type =
-                      style.type,
-
-                    top =
-                      top,
-
-                    bottom =
-                      bottom,
-
-                    left =
-                      left,
-
-                    right =
-                      right,
-                  }
+                  style.make_shape(
+                    top,
+                    bottom,
+                    left,
+                    right
+                  )
                 )
 
                 ----------------------------------------------------------------
@@ -322,230 +334,6 @@ local function scan_rectangular(
 end
 
 ---------------------------------------------------------------------
--- Validate reconstructed diamond
----------------------------------------------------------------------
-
-local function diamond_matches(
-  buf,
-  shape
-)
-  for row =
-    shape.top,
-    shape.bottom
-  do
-    local left,
-      right,
-      upper =
-      diamond.outline_for_row(
-        shape,
-        row
-      )
-
-    local expected_left
-    local expected_right
-
-    if upper then
-      expected_left =
-        "╱"
-
-      expected_right =
-        "╲"
-    else
-      expected_left =
-        "╲"
-
-      expected_right =
-        "╱"
-    end
-
-    if
-      char_at(
-        buf,
-        row,
-        left
-      ) ~= expected_left
-    then
-      return false
-    end
-
-    if
-      char_at(
-        buf,
-        row,
-        right
-      ) ~= expected_right
-    then
-      return false
-    end
-  end
-
-  return true
-end
-
----------------------------------------------------------------------
--- Maximum actual line width over row range
----------------------------------------------------------------------
-
-local function widest_row(
-  buf,
-  top,
-  bottom
-)
-  local widest = 0
-
-  for row = top, bottom do
-    widest =
-      math.max(
-        widest,
-        row_width(
-          buf,
-          row
-        )
-      )
-  end
-
-  return widest
-end
-
----------------------------------------------------------------------
--- Scan diamonds
---
--- Diamond geometry is already distinctive because it uses:
---
---     ╱ ╲
---
--- rather than orthogonal connector topology.
----------------------------------------------------------------------
-
-local function scan_diamonds(
-  buf,
-  results,
-  seen
-)
-  local line_count =
-    vim.api.nvim_buf_line_count(buf)
-
-  for top = 0, line_count - 1 do
-    local width =
-      row_width(
-        buf,
-        top
-      )
-
-    for center_left =
-      0,
-      width - 2
-    do
-      local center_right =
-        center_left + 1
-
-      ----------------------------------------------------------------
-      -- Top apex:
-      --
-      --     ╱╲
-      ----------------------------------------------------------------
-
-      if
-        char_at(
-          buf,
-          top,
-          center_left
-        ) == "╱"
-
-        and char_at(
-          buf,
-          top,
-          center_right
-        ) == "╲"
-      then
-        ----------------------------------------------------------------
-        -- Search for bottom apex:
-        --
-        --     ╲╱
-        ----------------------------------------------------------------
-
-        for bottom =
-          top + 4,
-          line_count - 1
-        do
-          if
-            char_at(
-              buf,
-              bottom,
-              center_left
-            ) == "╲"
-
-            and char_at(
-              buf,
-              bottom,
-              center_right
-            ) == "╱"
-          then
-            local widest =
-              widest_row(
-                buf,
-                top,
-                bottom
-              )
-
-            local maximum_expand =
-              math.min(
-                center_left,
-                widest
-                  - center_right
-                  - 1
-              )
-
-            local found =
-              false
-
-            ----------------------------------------------------------------
-            -- Reconstruct possible original diamond width.
-            ----------------------------------------------------------------
-
-            for max_expand =
-              1,
-              maximum_expand
-            do
-              local shape =
-                diamond.make_shape(
-                  top,
-                  bottom,
-                  center_left,
-                  center_right,
-                  max_expand
-                )
-
-              if
-                diamond_matches(
-                  buf,
-                  shape
-                )
-              then
-                add_result(
-                  results,
-                  seen,
-                  shape
-                )
-
-                found =
-                  true
-
-                break
-              end
-            end
-
-            if found then
-              break
-            end
-          end
-        end
-      end
-    end
-  end
-end
-
----------------------------------------------------------------------
 -- Public scan
 ---------------------------------------------------------------------
 
@@ -553,67 +341,13 @@ function M.scan(buf)
   local results = {}
   local seen = {}
 
-  -------------------------------------------------------------------
-  -- Normal rectangles
-  -------------------------------------------------------------------
-
-  scan_rectangular(
-    buf,
-    {
-      type =
-        "rectangle",
-
-      top_left =
-        "┌",
-
-      top_right =
-        "┐",
-
-      bottom_left =
-        "└",
-
-      bottom_right =
-        "┘",
-    },
-    results,
-    seen
-  )
-
-  -------------------------------------------------------------------
-  -- Rounded rectangles
-  -------------------------------------------------------------------
-
-  scan_rectangular(
-    buf,
-    {
-      type =
-        "rounded_rectangle",
-
-      top_left =
-        "╭",
-
-      top_right =
-        "╮",
-
-      bottom_left =
-        "╰",
-
-      bottom_right =
-        "╯",
-    },
-    results,
-    seen
-  )
-
-  -------------------------------------------------------------------
-  -- Diamonds
-  -------------------------------------------------------------------
-
-  scan_diamonds(
-    buf,
-    results,
-    seen
-  )
+  for _, scan_fn in ipairs(scanners) do
+    scan_fn(
+      buf,
+      results,
+      seen
+    )
+  end
 
   -------------------------------------------------------------------
   -- Stable ordering

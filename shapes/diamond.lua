@@ -1,6 +1,9 @@
 local canvas =
   require "draw.canvas"
 
+local discovery =
+  require "draw.discovery"
+
 local shape_chars =
   require "draw.shape_chars"
 
@@ -202,6 +205,100 @@ function M.make_shape(
 
     entry_point =
       entry_point,
+
+    ----------------------------------------------------------------
+    -- span(shape, row) → left, right
+    --
+    -- Returns the two outline-column positions owned by this diamond
+    -- on `row`.  Delegates to outline_for_row so the caller does not
+    -- need to know about diamond geometry.
+    ----------------------------------------------------------------
+    span = function(s, row)
+      local left, right =
+        outline_for_row(s, row)
+
+      return left, right
+    end,
+
+    ----------------------------------------------------------------
+    -- on_boundary(shape, row, col) → boolean
+    --
+    -- Returns true if (row, col) lies on the diamond's outline.
+    -- A cell is on the outline when it is within the bounding row
+    -- range AND its column matches one of the two outline cells for
+    -- that row as computed by outline_for_row.
+    ----------------------------------------------------------------
+    on_boundary = function(s, row, col)
+      if row < s.top or row > s.bottom then
+        return false
+      end
+
+      local left, right =
+        outline_for_row(s, row)
+
+      return col == left or col == right
+    end,
+
+    ----------------------------------------------------------------
+    -- outside_cells(shape, side) → list of {row, col}
+    --
+    -- Returns cells just outside the diamond on the given side.
+    -- Used by connector.lua to find candidate connector start/end
+    -- positions adjacent to the shape boundary.
+    --
+    -- left/right: one column beyond the outline, for each interior
+    --             row that has writable space (mirrors side_outside_cells
+    --             logic in connector.lua)
+    -- up/down:    one row beyond the apex, at the horizontal center
+    ----------------------------------------------------------------
+    outside_cells = function(s, side)
+      local result = {}
+
+      if side == "left" or side == "right" then
+        for row = s.top + 1, s.bottom - 1 do
+          local wl, wr =
+            writable_bounds(s, row)
+
+          if wl ~= nil and wr ~= nil then
+            local left, right =
+              outline_for_row(s, row)
+
+            local col =
+              side == "left"
+              and left - 1
+              or right + 1
+
+            if col >= 0 then
+              table.insert(
+                result,
+                { row = row, col = col }
+              )
+            end
+          end
+        end
+
+        return result
+      end
+
+      local col =
+        math.floor(
+          (s.left + s.right) / 2
+        )
+
+      local row =
+        side == "up"
+        and s.top - 1
+        or s.bottom + 1
+
+      if row >= 0 then
+        table.insert(
+          result,
+          { row = row, col = col }
+        )
+      end
+
+      return result
+    end,
   }
 end
 
@@ -427,5 +524,208 @@ function M.draw(
 
   return true, shape
 end
+
+---------------------------------------------------------------------
+-- Character width of a row (used by the scanner)
+---------------------------------------------------------------------
+
+local function row_width(buf, row)
+  local line =
+    canvas.get_line(buf, row)
+
+  return canvas.char_count(line)
+end
+
+---------------------------------------------------------------------
+-- Maximum actual line width over a row range
+---------------------------------------------------------------------
+
+local function widest_row(buf, top, bottom)
+  local widest = 0
+
+  for row = top, bottom do
+    widest =
+      math.max(
+        widest,
+        row_width(buf, row)
+      )
+  end
+
+  return widest
+end
+
+---------------------------------------------------------------------
+-- Validate reconstructed diamond against buffer content
+---------------------------------------------------------------------
+
+local function diamond_matches(buf, shape)
+  for row = shape.top, shape.bottom do
+    local left, right, upper =
+      outline_for_row(shape, row)
+
+    local expected_left
+    local expected_right
+
+    if upper then
+      expected_left = "╱"
+      expected_right = "╲"
+    else
+      expected_left = "╲"
+      expected_right = "╱"
+    end
+
+    if
+      canvas.safe_get_char(
+        buf,
+        row,
+        left
+      ) ~= expected_left
+    then
+      return false
+    end
+
+    if
+      canvas.safe_get_char(
+        buf,
+        row,
+        right
+      ) ~= expected_right
+    then
+      return false
+    end
+  end
+
+  return true
+end
+
+---------------------------------------------------------------------
+-- Scan diamonds
+--
+-- Diamond geometry is already distinctive because it uses:
+--
+--     ╱ ╲
+--
+-- rather than orthogonal connector topology.
+---------------------------------------------------------------------
+
+local function scan_diamonds(buf, results, seen)
+  local line_count =
+    vim.api.nvim_buf_line_count(buf)
+
+  for top = 0, line_count - 1 do
+    local width = row_width(buf, top)
+
+    for center_left = 0, width - 2 do
+      local center_right = center_left + 1
+
+      ----------------------------------------------------------------
+      -- Top apex:
+      --
+      --     ╱╲
+      ----------------------------------------------------------------
+
+      if
+        canvas.safe_get_char(
+          buf,
+          top,
+          center_left
+        ) == "╱"
+
+        and canvas.safe_get_char(
+          buf,
+          top,
+          center_right
+        ) == "╲"
+      then
+        ----------------------------------------------------------------
+        -- Search for bottom apex:
+        --
+        --     ╲╱
+        ----------------------------------------------------------------
+
+        for bottom = top + 4, line_count - 1 do
+          if
+            canvas.safe_get_char(
+              buf,
+              bottom,
+              center_left
+            ) == "╲"
+
+            and canvas.safe_get_char(
+              buf,
+              bottom,
+              center_right
+            ) == "╱"
+          then
+            local widest =
+              widest_row(buf, top, bottom)
+
+            local maximum_expand =
+              math.min(
+                center_left,
+                widest - center_right - 1
+              )
+
+            local found = false
+
+            ----------------------------------------------------------------
+            -- Reconstruct possible original diamond width.
+            ----------------------------------------------------------------
+
+            for max_expand = 1, maximum_expand do
+              local shape =
+                M.make_shape(
+                  top,
+                  bottom,
+                  center_left,
+                  center_right,
+                  max_expand
+                )
+
+              if diamond_matches(buf, shape) then
+                local key =
+                  table.concat(
+                    {
+                      shape.type,
+                      shape.top,
+                      shape.bottom,
+                      shape.left,
+                      shape.right,
+                    },
+                    ":"
+                  )
+
+                if not seen[key] then
+                  seen[key] = true
+
+                  table.insert(results, shape)
+                end
+
+                found = true
+
+                break
+              end
+            end
+
+            if found then
+              break
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+---------------------------------------------------------------------
+-- Register with the discovery system
+--
+-- Called at require-time so that discovery.scan() finds diamonds
+-- without hard-coding the scanner inside discovery.lua.
+---------------------------------------------------------------------
+
+discovery.register(function(buf, results, seen)
+  scan_diamonds(buf, results, seen)
+end)
 
 return M

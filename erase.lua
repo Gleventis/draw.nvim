@@ -94,66 +94,45 @@ function M.at(buf, row, col)
       local neighbor_col =
         col + delta.col
 
+      local neighbor_char =
+        canvas.safe_get_char(
+          buf,
+          neighbor_row,
+          neighbor_col
+        )
+
       if
-        neighbor_row >= 0
-        and neighbor_col >= 0
+        not arrows.is_arrowhead(
+          neighbor_char
+        )
+        and not shape_chars.is(
+          neighbor_char
+        )
       then
-        local line_count =
-          vim.api.nvim_buf_line_count(buf)
+        local neighbor_connections =
+          topology.from_char(
+            neighbor_char
+          )
 
-        if neighbor_row < line_count then
-          local line =
-            canvas.get_line(
-              buf,
-              neighbor_row
+        if
+          neighbor_connections
+          ~= nil
+        then
+          topology.remove(
+            neighbor_connections,
+            delta.opposite
+          )
+
+          canvas.undo_join()
+
+          canvas.set_char(
+            buf,
+            neighbor_row,
+            neighbor_col,
+            topology.to_char(
+              neighbor_connections
             )
-
-          if
-            neighbor_col
-            < canvas.char_count(line)
-          then
-            local neighbor_char =
-              canvas.get_char(
-                buf,
-                neighbor_row,
-                neighbor_col
-              )
-
-            if
-              not arrows.is_arrowhead(
-                neighbor_char
-              )
-              and not shape_chars.is(
-                neighbor_char
-              )
-            then
-              local neighbor_connections =
-                topology.from_char(
-                  neighbor_char
-                )
-
-              if
-                neighbor_connections
-                ~= nil
-              then
-                topology.remove(
-                  neighbor_connections,
-                  delta.opposite
-                )
-
-                canvas.undo_join()
-
-                canvas.set_char(
-                  buf,
-                  neighbor_row,
-                  neighbor_col,
-                  topology.to_char(
-                    neighbor_connections
-                  )
-                )
-              end
-            end
-          end
+          )
         end
       end
     end

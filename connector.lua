@@ -16,67 +16,11 @@ local shapes =
 local navigation =
   require "draw.navigation"
 
-local diamond =
-  require "draw.shapes.diamond"
-
 local M = {}
 
 ---------------------------------------------------------------------
 -- Direction helpers
 ---------------------------------------------------------------------
-
-local opposite = {
-  left = "right",
-  right = "left",
-  up = "down",
-  down = "up",
-}
-
-local arrowheads = {
-  left = "◀",
-  right = "▶",
-  up = "▲",
-  down = "▼",
-}
-
----------------------------------------------------------------------
--- Safe character access
----------------------------------------------------------------------
-
-local function char_at(
-  buf,
-  row,
-  col
-)
-  if row < 0 or col < 0 then
-    return ""
-  end
-
-  local line_count =
-    vim.api.nvim_buf_line_count(buf)
-
-  if row >= line_count then
-    return ""
-  end
-
-  local line =
-    canvas.get_line(
-      buf,
-      row
-    )
-
-  if
-    col >= canvas.char_count(line)
-  then
-    return ""
-  end
-
-  return canvas.get_char(
-    buf,
-    row,
-    col
-  )
-end
 
 ---------------------------------------------------------------------
 -- Does topology actually contain a connection?
@@ -242,141 +186,6 @@ local function outside_anchor(
     col + delta.col
 end
 
----------------------------------------------------------------------
--- ALL possible outside cells along one side of a shape
---
--- This is the important difference from the old implementation.
---
--- Reverse-connection detection no longer assumes that an old
--- connector used exactly the same anchor that we'd choose today.
----------------------------------------------------------------------
-
-local function side_outside_cells(
-  shape,
-  side
-)
-  local result = {}
-
-  -------------------------------------------------------------------
-  -- Left / right side
-  -------------------------------------------------------------------
-
-  if
-    side == "left"
-    or side == "right"
-  then
-    for row =
-      shape.top + 1,
-      shape.bottom - 1
-    do
-      local left,
-        right =
-        shapes.row_bounds(
-          shape,
-          row
-        )
-
-      if
-        left ~= nil
-        and right ~= nil
-      then
-        local col
-
-        if side == "left" then
-          ----------------------------------------------------------------
-          -- interior left -> border -> outside
-          ----------------------------------------------------------------
-
-          col =
-            left - 2
-        else
-          col =
-            right + 2
-        end
-
-        if col >= 0 then
-          table.insert(
-            result,
-            {
-              row = row,
-              col = col,
-            }
-          )
-        end
-      end
-    end
-
-    return result
-  end
-
-  -------------------------------------------------------------------
-  -- Top / bottom side
-  --
-  -- Rectangles can be connected across the whole horizontal edge.
-  --
-  -- For diamonds we use the center/apex area because that's how our
-  -- current connector anchors are generated.
-  -------------------------------------------------------------------
-
-  if shape.type == "diamond" then
-    local col =
-      math.floor(
-        (shape.left + shape.right)
-        / 2
-      )
-
-    local row
-
-    if side == "up" then
-      row =
-        shape.top - 1
-    else
-      row =
-        shape.bottom + 1
-    end
-
-    if row >= 0 then
-      table.insert(
-        result,
-        {
-          row = row,
-          col = col,
-        }
-      )
-    end
-
-    return result
-  end
-
-  local row
-
-  if side == "up" then
-    row =
-      shape.top - 1
-  else
-    row =
-      shape.bottom + 1
-  end
-
-  if row < 0 then
-    return result
-  end
-
-  for col =
-    shape.left + 1,
-    shape.right - 1
-  do
-    table.insert(
-      result,
-      {
-        row = row,
-        col = col,
-      }
-    )
-  end
-
-  return result
-end
 
 ---------------------------------------------------------------------
 -- Append an orthogonal segment
@@ -608,66 +417,6 @@ local function direction_between(
 end
 
 ---------------------------------------------------------------------
--- Actual shape boundary
----------------------------------------------------------------------
-
-local function on_shape_boundary(
-  shape,
-  row,
-  col
-)
-  if
-    row < shape.top
-    or row > shape.bottom
-    or col < shape.left
-    or col > shape.right
-  then
-    return false
-  end
-
-  -------------------------------------------------------------------
-  -- Diamond
-  -------------------------------------------------------------------
-
-  if shape.type == "diamond" then
-    local left,
-      right =
-      diamond.outline_for_row(
-        shape,
-        row
-      )
-
-    return
-      col == left
-      or col == right
-  end
-
-  -------------------------------------------------------------------
-  -- Rectangle / rounded rectangle
-  -------------------------------------------------------------------
-
-  local horizontal =
-    (
-      row == shape.top
-      or row == shape.bottom
-    )
-    and col >= shape.left
-    and col <= shape.right
-
-  local vertical =
-    (
-      col == shape.left
-      or col == shape.right
-    )
-    and row >= shape.top
-    and row <= shape.bottom
-
-  return
-    horizontal
-    or vertical
-end
-
----------------------------------------------------------------------
 -- Other-shape collision
 ---------------------------------------------------------------------
 
@@ -684,7 +433,7 @@ local function intersects_other_shape(
     if
       shape.id ~= source.id
       and shape.id ~= target.id
-      and on_shape_boundary(
+      and shape.on_boundary(
         shape,
         row,
         col
@@ -708,18 +457,14 @@ local function cells_connected(
   direction
 )
   local from_char =
-    char_at(
-      buf,
-      from.row,
-      from.col
-    )
+    canvas.safe_get_char(buf,
+    from.row,
+    from.col)
 
   local to_char =
-    char_at(
-      buf,
-      to.row,
-      to.col
-    )
+    canvas.safe_get_char(buf,
+    to.row,
+    to.col)
 
   local from_connections =
     topology.from_char(
@@ -747,7 +492,7 @@ local function cells_connected(
       direction
     ]
     and to_connections[
-      opposite[direction]
+      canvas.directions[direction].opposite
     ]
 end
 
@@ -763,11 +508,9 @@ local function reachable_topology(
   local visited = {}
 
   local start_char =
-    char_at(
-      buf,
-      start_row,
-      start_col
-    )
+    canvas.safe_get_char(buf,
+    start_row,
+    start_col)
 
   local start_connections =
     topology.from_char(
@@ -806,11 +549,9 @@ local function reachable_topology(
       head + 1
 
     local current_char =
-      char_at(
-        buf,
-        current.row,
-        current.col
-      )
+      canvas.safe_get_char(buf,
+      current.row,
+      current.col)
 
     local connections =
       topology.from_char(
@@ -910,28 +651,26 @@ local function find_reverse_connection(
     direction
 
   local target_side =
-    opposite[
-      direction
-    ]
+    canvas.directions[direction].opposite
 
   local expected_source_arrow =
-    arrowheads[
-      opposite[direction]
+    arrows.arrowheads[
+      canvas.directions[direction].opposite
     ]
 
   local wanted_target_arrow =
-    arrowheads[
+    arrows.arrowheads[
       direction
     ]
 
   local source_candidates =
-    side_outside_cells(
+    source.outside_cells(
       source,
       source_side
     )
 
   local target_candidates =
-    side_outside_cells(
+    target.outside_cells(
       target,
       target_side
     )
@@ -942,9 +681,7 @@ local function find_reverse_connection(
     ]
 
   local incoming_direction =
-    opposite[
-      direction
-    ]
+    canvas.directions[direction].opposite
 
   -------------------------------------------------------------------
   -- Try every possible reverse arrow along the source-facing side.
@@ -954,11 +691,9 @@ local function find_reverse_connection(
     in ipairs(source_candidates)
   do
     local source_char =
-      char_at(
-        buf,
-        source_cell.row,
-        source_cell.col
-      )
+      canvas.safe_get_char(buf,
+      source_cell.row,
+      source_cell.col)
 
     if
       source_char
@@ -991,11 +726,9 @@ local function find_reverse_connection(
         in ipairs(target_candidates)
       do
         local target_char =
-          char_at(
-            buf,
-            target_cell.row,
-            target_cell.col
-          )
+          canvas.safe_get_char(buf,
+          target_cell.row,
+          target_cell.col)
 
         --------------------------------------------------------------
         -- Already bidirectional
@@ -1079,7 +812,7 @@ local function upgrade_reverse_connector(
     buf,
     target_cell.row,
     target_cell.col,
-    arrowheads[
+    arrows.arrowheads[
       direction
     ]
   )
@@ -1135,11 +868,9 @@ local function validate_new_path(
     path[#path]
 
   local final_char =
-    char_at(
-      buf,
-      final.row,
-      final.col
-    )
+    canvas.safe_get_char(buf,
+    final.row,
+    final.col)
 
   if
     final_char ~= ""
@@ -1159,11 +890,9 @@ local function validate_new_path(
       path[index]
 
     local char =
-      char_at(
-        buf,
-        cell.row,
-        cell.col
-      )
+      canvas.safe_get_char(buf,
+      cell.row,
+      cell.col)
 
     if
       arrows.is_arrowhead(
@@ -1319,7 +1048,7 @@ local function draw_path(
     buf,
     final.row,
     final.col,
-    arrowheads[
+    arrows.arrowheads[
       arrow_direction
     ]
   )
@@ -1366,11 +1095,9 @@ local function delete_write(
   context
 )
   local current =
-    char_at(
-      buf,
-      row,
-      col
-    )
+    canvas.safe_get_char(buf,
+    row,
+    col)
 
   if current == char then
     return
@@ -1479,11 +1206,9 @@ local function prune_branch(
       true
 
     local char =
-      char_at(
-        buf,
-        row,
-        col
-      )
+      canvas.safe_get_char(buf,
+      row,
+      col)
 
     -----------------------------------------------------------------
     -- Arrowhead = connector endpoint
@@ -1616,11 +1341,9 @@ local function prune_branch(
       col + delta.col
 
     local next_char =
-      char_at(
-        buf,
-        next_row,
-        next_col
-      )
+      canvas.safe_get_char(buf,
+      next_row,
+      next_col)
 
     -----------------------------------------------------------------
     -- Current cell belongs exclusively to the branch being deleted.
@@ -1678,9 +1401,7 @@ local function prune_branch(
       next_col
 
     incoming =
-      opposite[
-        next_direction
-      ]
+      canvas.directions[next_direction].opposite
   end
 end
 
@@ -1695,7 +1416,7 @@ local function delete_side_connectors(
   context
 )
   local candidates =
-    side_outside_cells(
+    shape.outside_cells(
       shape,
       side
     )
@@ -1706,9 +1427,7 @@ local function delete_side_connectors(
     ]
 
   local inward =
-    opposite[
-      side
-    ]
+    canvas.directions[side].opposite
 
   -------------------------------------------------------------------
   -- Any arrowhead touching a shape must point INTO that shape.
@@ -1724,7 +1443,7 @@ local function delete_side_connectors(
   -------------------------------------------------------------------
 
   local expected_arrow =
-    arrowheads[
+    arrows.arrowheads[
       inward
     ]
 
@@ -1738,11 +1457,9 @@ local function delete_side_connectors(
       candidate.col
 
     local char =
-      char_at(
-        buf,
-        row,
-        col
-      )
+      canvas.safe_get_char(buf,
+      row,
+      col)
 
     -----------------------------------------------------------------
     -- Connector ends at this shape.
@@ -1816,11 +1533,9 @@ local function delete_side_connectors(
           col + outward.col
 
         local legacy_char =
-          char_at(
-            buf,
-            legacy_row,
-            legacy_col
-          )
+          canvas.safe_get_char(buf,
+          legacy_row,
+          legacy_col)
 
         if
           legacy_char
@@ -2038,9 +1753,7 @@ function M.connect(
     )
 
   local target_side =
-    opposite[
-      direction
-    ]
+    canvas.directions[direction].opposite
 
   local end_row,
     end_col =

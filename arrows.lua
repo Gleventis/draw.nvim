@@ -20,6 +20,8 @@ local arrowhead_lookup = {
   ["▼"] = true,
 }
 
+M.arrowheads = arrowheads
+
 function M.is_arrowhead(char)
   return
     arrowhead_lookup[char] == true
