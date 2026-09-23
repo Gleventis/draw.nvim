@@ -171,7 +171,7 @@ local function handle_arrow(direction)
   -------------------------------------------------------------------
 
   if state.mode == "box" then
-    canvas.move_only(direction)
+    canvas.move_only(direction, state.region)
     return
   end
 
@@ -449,6 +449,19 @@ local function toggle_shape(kind)
 
     return
   end
+
+  local min_row =
+    math.min(start.row, end_row)
+
+  local offset =
+    canvas.grow_region_up(
+      buf,
+      min_row,
+      state.region
+    )
+
+  start.row = start.row + offset
+  end_row = end_row + offset
 
   local success,
     shape =
@@ -1157,6 +1170,11 @@ function M.start(region_arg)
   states[buf] =
     state
 
+  if state.region then
+    state.region.shapes = state.shapes
+    state.region.connectors = state.connectors
+  end
+
   -------------------------------------------------------------------
   -- Rediscover shapes already stored in the file
   -------------------------------------------------------------------
@@ -1241,7 +1259,7 @@ function M.start(region_arg)
           return
         end
 
-        canvas.move_only(dir)
+        canvas.move_only(dir, state.region)
       end
     )
   end
@@ -1477,13 +1495,12 @@ end
 ---------------------------------------------------------------------
 -- Start SafeDraw mode
 --
--- Detects the comment block around the cursor, stores the region in
--- state, and enters Draw mode with that region active. All canvas
--- operations will strip/restore the comment prefix transparently.
+-- Determines the comment prefix from the file extension and
+-- surrounding indentation, prepares a starting line (writing the
+-- prefix to an empty line or inserting a new line below one with
+-- content), then enters Draw mode with that region active.
 --
--- Aborts with a notification when:
---   - the file extension is unsupported
---   - the cursor is not inside a comment line
+-- Aborts with a notification when the file extension is unsupported.
 ---------------------------------------------------------------------
 
 function M.start_safe()
@@ -1494,8 +1511,27 @@ function M.start_safe()
     return
   end
 
+  -------------------------------------------------------------------
+  -- Filetypes with no comment syntax (e.g. Markdown) fall back to
+  -- plain Draw mode rather than aborting with an error.
+  -------------------------------------------------------------------
+
+  local ext =
+    vim.fn.expand("%:e")
+
+  if ext == "md" then
+    M.start()
+    return
+  end
+
+  local cursor =
+    vim.api.nvim_win_get_cursor(0)
+
+  local row =
+    cursor[1] - 1
+
   local r, err =
-    region_module.create(buf)
+    region_module.create(buf, row)
 
   if r == nil then
     vim.notify(
@@ -1507,6 +1543,13 @@ function M.start_safe()
   end
 
   M.start(r)
+
+  canvas.set_cursor(
+    buf,
+    r.start_row,
+    0,
+    r
+  )
 end
 
 ---------------------------------------------------------------------

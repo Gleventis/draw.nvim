@@ -98,47 +98,52 @@ function M.at(buf, row, col, region)
       local neighbor_col =
         col + delta.col
 
-      local neighbor_char =
-        canvas.safe_get_char(
-          buf,
-          neighbor_row,
-          neighbor_col,
-          region
-        )
-
       if
-        not arrows.is_arrowhead(
-          neighbor_char
-        )
-        and not shape_chars.is(
-          neighbor_char
-        )
+        neighbor_row >= 0
+        and neighbor_col >= 0
       then
-        local neighbor_connections =
-          topology.from_char(
-            neighbor_char
-          )
-
-        if
-          neighbor_connections
-          ~= nil
-        then
-          topology.remove(
-            neighbor_connections,
-            delta.opposite
-          )
-
-          canvas.undo_join()
-
-          canvas.set_char(
+        local neighbor_char =
+          canvas.safe_get_char(
             buf,
             neighbor_row,
             neighbor_col,
-            topology.to_char(
-              neighbor_connections
-            ),
             region
           )
+
+        if
+          not arrows.is_arrowhead(
+            neighbor_char
+          )
+          and not shape_chars.is(
+            neighbor_char
+          )
+        then
+          local neighbor_connections =
+            topology.from_char(
+              neighbor_char
+            )
+
+          if
+            neighbor_connections
+            ~= nil
+          then
+            topology.remove(
+              neighbor_connections,
+              delta.opposite
+            )
+
+            canvas.undo_join()
+
+            canvas.set_char(
+              buf,
+              neighbor_row,
+              neighbor_col,
+              topology.to_char(
+                neighbor_connections
+              ),
+              region
+            )
+          end
         end
       end
     end

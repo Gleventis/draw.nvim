@@ -28,59 +28,15 @@ function M.get_marker()
 end
 
 ---------------------------------------------------------------------
--- Detect the full comment prefix on a given buffer row
+-- Detect leading whitespace from the nearest non-empty surrounding line
 --
--- The prefix is: leading whitespace + comment marker + optional space.
--- Example: "    # " for an indented Python comment.
---
--- Returns:
---   prefix string, prefix_len (in characters)
---   or nil if the line does not start with the comment pattern
+-- Scans upward from row first, then downward. Returns the leading
+-- whitespace of the first non-empty line found, or "" if none exists.
 ---------------------------------------------------------------------
 
-function M.detect_prefix(buf, row, marker)
-  local lines =
-    vim.api.nvim_buf_get_lines(
-      buf,
-      row,
-      row + 1,
-      false
-    )
-
-  local line =
-    lines[1] or ""
-
-  local escaped =
-    vim.pesc(marker)
-
-  local prefix =
-    line:match(
-      "^(%s*" .. escaped .. "%s?)"
-    )
-
-  if prefix == nil then
-    return nil
-  end
-
-  return prefix, vim.fn.strchars(prefix)
-end
-
----------------------------------------------------------------------
--- Detect contiguous block of lines sharing the same prefix
---
--- Scans upward and downward from row, stopping when a line does
--- not start with prefix.
---
--- Returns:
---   top_row, bottom_row  (0-indexed, inclusive)
----------------------------------------------------------------------
-
-function M.detect_block(buf, row, prefix)
+function M.detect_indent(buf, row)
   local line_count =
     vim.api.nvim_buf_line_count(buf)
-
-  local top_row    = row
-  local bottom_row = row
 
   local r = row - 1
 
@@ -96,11 +52,10 @@ function M.detect_block(buf, row, prefix)
     local line =
       lines[1] or ""
 
-    if line:sub(1, #prefix) ~= prefix then
-      break
+    if line:match("%S") then
+      return line:match("^(%s*)") or ""
     end
 
-    top_row = r
     r = r - 1
   end
 
@@ -118,29 +73,97 @@ function M.detect_block(buf, row, prefix)
     local line =
       lines[1] or ""
 
-    if line:sub(1, #prefix) ~= prefix then
-      break
+    if line:match("%S") then
+      return line:match("^(%s*)") or ""
     end
 
-    bottom_row = r
     r = r + 1
+  end
+
+  return ""
+end
+
+---------------------------------------------------------------------
+-- Find the contiguous block of comment lines sharing the given prefix
+--
+-- Scans upward then downward from row, stopping at the first line
+-- that does not start with prefix.
+--
+-- Returns:
+--   top_row, bottom_row  (both inclusive, 0-based)
+---------------------------------------------------------------------
+
+function M.detect_block(buf, row, prefix)
+  local line_count =
+    vim.api.nvim_buf_line_count(buf)
+
+  local top_row = row
+  local r = row - 1
+
+  while r >= 0 do
+    local lines =
+      vim.api.nvim_buf_get_lines(
+        buf,
+        r,
+        r + 1,
+        false
+      )
+
+    local line =
+      lines[1] or ""
+
+    if line:sub(1, #prefix) == prefix then
+      top_row = r
+      r = r - 1
+    else
+      break
+    end
+  end
+
+  local bottom_row = row
+  r = row + 1
+
+  while r < line_count do
+    local lines =
+      vim.api.nvim_buf_get_lines(
+        buf,
+        r,
+        r + 1,
+        false
+      )
+
+    local line =
+      lines[1] or ""
+
+    if line:sub(1, #prefix) == prefix then
+      bottom_row = r
+      r = r + 1
+    else
+      break
+    end
   end
 
   return top_row, bottom_row
 end
 
 ---------------------------------------------------------------------
--- Create a region from the current cursor position
+-- Create a region at the given buffer row
 --
--- Reads the file extension to find the comment marker, extracts the
--- full prefix from the cursor line, and scans the contiguous block.
+-- Determines the comment prefix from the file extension and
+-- indentation, then:
+--   - existing comment line: detects the surrounding block and returns
+--     its boundaries for re-editing
+--   - empty line: inherits indent from the nearest non-empty neighbour,
+--     writes the prefix to that line
+--   - non-empty non-comment line: inherits indent from the current
+--     line itself, inserts a new prefixed line below it
 --
 -- Returns:
---   region table  { prefix, prefix_len, top_row, bottom_row }
+--   region table  { prefix, prefix_len, top_row, bottom_row, start_row }
 --   or nil, error_message on failure
 ---------------------------------------------------------------------
 
-function M.create(buf)
+function M.create(buf, row)
   local marker =
     M.get_marker()
 
@@ -152,36 +175,87 @@ function M.create(buf)
       "unsupported filetype: " .. ext
   end
 
-  local cursor =
-    vim.api.nvim_win_get_cursor(0)
-
-  local row =
-    cursor[1] - 1
-
-  local prefix, prefix_len =
-    M.detect_prefix(
+  local lines =
+    vim.api.nvim_buf_get_lines(
       buf,
       row,
-      marker
+      row + 1,
+      false
     )
 
-  if prefix == nil then
-    return nil,
-      "cursor is not inside a comment block"
+  local line =
+    lines[1] or ""
+
+  -------------------------------------------------------------------
+  -- Empty line: inherit indent from nearest non-empty neighbour.
+  -- Non-empty line: use the current line's own leading whitespace
+  -- so the inserted comment below matches its indentation level.
+  -------------------------------------------------------------------
+
+  local indent
+
+  if line:match("^%s*$") then
+    indent =
+      M.detect_indent(buf, row)
+  else
+    indent =
+      line:match("^(%s*)") or ""
   end
 
-  local top_row, bottom_row =
-    M.detect_block(
+  local prefix =
+    indent .. marker .. " "
+
+  local prefix_len =
+    vim.fn.strchars(prefix)
+
+  -------------------------------------------------------------------
+  -- Re-editing: cursor is already on a commented diagram line.
+  -- Detect the full block and return its boundaries.
+  -------------------------------------------------------------------
+
+  if line:sub(1, #prefix) == prefix then
+    local top_row, bottom_row =
+      M.detect_block(buf, row, prefix)
+
+    return {
+      prefix     = prefix,
+      prefix_len = prefix_len,
+      top_row    = top_row,
+      bottom_row = bottom_row,
+      start_row  = row,
+    }
+  end
+
+  local start_row
+
+  if line:match("^%s*$") then
+    vim.api.nvim_buf_set_lines(
       buf,
       row,
-      prefix
+      row + 1,
+      false,
+      { prefix }
     )
+
+    start_row = row
+  else
+    vim.api.nvim_buf_set_lines(
+      buf,
+      row + 1,
+      row + 1,
+      false,
+      { prefix }
+    )
+
+    start_row = row + 1
+  end
 
   return {
     prefix     = prefix,
     prefix_len = prefix_len,
-    top_row    = top_row,
-    bottom_row = bottom_row,
+    top_row    = start_row,
+    bottom_row = start_row,
+    start_row  = start_row,
   }
 end
 

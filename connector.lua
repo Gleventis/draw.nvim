@@ -1730,6 +1730,29 @@ function M.route_between(
       end_col
     )
 
+  if region and #path > 0 then
+    local min_row = path[1].row
+
+    for _, cell in ipairs(path) do
+      if cell.row < min_row then
+        min_row = cell.row
+      end
+    end
+
+    local offset =
+      canvas.grow_region_up(
+        buf,
+        min_row,
+        region
+      )
+
+    if offset > 0 then
+      for _, cell in ipairs(path) do
+        cell.row = cell.row + offset
+      end
+    end
+  end
+
   local valid,
     reason =
     validate_new_path(

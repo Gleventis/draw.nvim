@@ -185,6 +185,22 @@ function M.execute(buf, state, shape, direction, context, region)
   local delta_row = delta.row
   local delta_col = delta.col
 
+  local new_top = shape.top + delta_row
+
+  local offset =
+    canvas.grow_region_up(
+      buf,
+      new_top,
+      region
+    )
+
+  if offset > 0 then
+    -- grow_region_up already shifted all shapes (including this one)
+    -- and the cursor position shifted too, so recalculate delta is
+    -- not needed — the shape moved down by offset, and new_top+offset
+    -- is now inside the region.
+  end
+
   if not M.validate(buf, state, shape, delta_row, delta_col, region) then
     return false
   end

@@ -68,7 +68,8 @@ function M.delete_shape(state)
   local connectors_changed =
     connector.delete_attached(
       state,
-      shape
+      shape,
+      region
     )
 
   -------------------------------------------------------------------

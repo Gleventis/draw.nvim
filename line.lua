@@ -29,6 +29,16 @@ function M.draw(direction, region)
     return
   end
 
+  local offset =
+    canvas.grow_region_up(
+      buf,
+      target_row,
+      region
+    )
+
+  row = row + offset
+  target_row = target_row + offset
+
   canvas.ensure_col(
     buf,
     row,

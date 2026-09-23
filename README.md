@@ -294,10 +294,13 @@ Draw diagrams inside comment blocks of source files using `:SafeDraw`.
 
 **How it works**
 
-Place the cursor inside a comment block, then run `:SafeDraw`. draw.nvim detects
-the comment prefix from the current line, scans contiguous lines sharing that
-prefix to define the region, then activates Draw mode with all operations
-transparently offset past the prefix.
+Place the cursor anywhere in a supported filetype and run `:SafeDraw`.
+
+- On a line that already starts with the comment prefix, `:SafeDraw` detects the full surrounding block and re-opens it for editing.
+- On an empty line, the comment prefix is written to that line and Draw mode starts there.
+- On a non-empty line, a new commented line is inserted below and Draw mode starts there.
+
+Indentation is inherited from the nearest surrounding code.
 
 ```python
 def foo():
@@ -306,11 +309,10 @@ def foo():
     # └──────────┘
 ```
 
-`:Draw` is unchanged — `:SafeDraw` is the opt-in variant for working inside
-comment blocks. Run `:SafeDraw` again (or `q`) to exit.
+`:Draw` is unchanged. Run `:SafeDraw` again or press `q` to exit.
 
-If the cursor is not inside a comment block of a supported filetype, a
-notification is shown and Draw mode does not activate.
+For `.md` files, `:SafeDraw` delegates to normal `:Draw` (no prefix needed).
+For unsupported filetypes, a notification is shown and Draw mode does not activate.
 
 ## Keymaps
 

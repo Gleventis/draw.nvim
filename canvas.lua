@@ -65,26 +65,102 @@ function M.set_line(buf, row, line, region)
   )
 end
 
+---------------------------------------------------------------------
+-- Upward region growth.
+--
+-- Inserts blank prefixed lines at region.top_row, pushing existing
+-- region content (and all code below it) down.  Returns the number
+-- of lines inserted so callers can shift ALL their row variables by
+-- the same amount.  region.top_row stays unchanged (it now points to
+-- the first new blank comment line).
+---------------------------------------------------------------------
+
+function M.grow_region_up(buf, target_row, region)
+  if not region then
+    return 0
+  end
+
+  if target_row >= region.top_row then
+    return 0
+  end
+
+  local count =
+    region.top_row - target_row
+
+  local new_lines = {}
+
+  for _ = 1, count do
+    table.insert(
+      new_lines,
+      region.prefix
+    )
+  end
+
+  vim.api.nvim_buf_set_lines(
+    buf,
+    region.top_row,
+    region.top_row,
+    false,
+    new_lines
+  )
+
+  if region.shapes then
+    for _, shape
+      in ipairs(region.shapes)
+    do
+      shape.top =
+        shape.top + count
+
+      shape.bottom =
+        shape.bottom + count
+    end
+  end
+
+  region.bottom_row =
+    region.bottom_row + count
+
+  return count
+end
+
 function M.ensure_row(buf, row, region)
+  if region then
+    -------------------------------------------------------------------
+    -- Downward growth: insert new prefixed lines directly after
+    -- region.bottom_row so that downstream code is pushed down rather
+    -- than overwritten.
+    -------------------------------------------------------------------
+    while row > region.bottom_row do
+      local insert_at =
+        region.bottom_row + 1
+
+      vim.api.nvim_buf_set_lines(
+        buf,
+        insert_at,
+        insert_at,
+        false,
+        { region.prefix }
+      )
+
+      region.bottom_row =
+        region.bottom_row + 1
+    end
+
+    return
+  end
+
   local line_count =
     vim.api.nvim_buf_line_count(buf)
 
   while row >= line_count do
-    local new_line = region and region.prefix or ""
-
     vim.api.nvim_buf_set_lines(
       buf,
       line_count,
       line_count,
       false,
-      { new_line }
+      { "" }
     )
 
     line_count = line_count + 1
-  end
-
-  if region and row > region.bottom_row then
-    region.bottom_row = row
   end
 end
 
@@ -93,6 +169,10 @@ function M.char_count(line)
 end
 
 function M.ensure_col(buf, row, col, region)
+  if region and row < region.top_row then
+    return
+  end
+
   M.ensure_row(buf, row, region)
 
   local line = M.get_line(buf, row, region)
@@ -112,6 +192,10 @@ function M.ensure_col(buf, row, col, region)
 end
 
 function M.get_char(buf, row, col, region)
+  if region and (row < region.top_row or row > region.bottom_row) then
+    return " "
+  end
+
   M.ensure_col(buf, row, col, region)
 
   local line =
@@ -127,6 +211,10 @@ end
 -- Non-mutating read: returns "" for out-of-bounds without extending the buffer.
 function M.safe_get_char(buf, row, col, region)
   if row < 0 or col < 0 then
+    return ""
+  end
+
+  if region and (row < region.top_row or row > region.bottom_row) then
     return ""
   end
 
@@ -148,6 +236,10 @@ function M.safe_get_char(buf, row, col, region)
 end
 
 function M.set_char(buf, row, col, value, region)
+  if region and row < region.top_row then
+    return
+  end
+
   M.ensure_col(buf, row, col, region)
 
   local line =
@@ -201,6 +293,10 @@ function M.current_position(region)
 
   if region then
     col = col - region.prefix_len
+
+    if col < 0 then
+      col = 0
+    end
   end
 
   return row, col
@@ -215,15 +311,24 @@ function M.set_cursor(buf, row, col, region)
   local effective_col =
     col + (region and region.prefix_len or 0)
 
-  local prefix =
-    vim.fn.strcharpart(
-      line,
-      0,
-      effective_col
-    )
+  local char_len =
+    M.char_count(line)
 
-  local byte_col =
-    #prefix
+  local byte_col
+
+  if effective_col <= char_len then
+    local prefix =
+      vim.fn.strcharpart(
+        line,
+        0,
+        effective_col
+      )
+
+    byte_col = #prefix
+  else
+    byte_col =
+      #line + (effective_col - char_len)
+  end
 
   vim.api.nvim_win_set_cursor(
     0,
@@ -238,7 +343,7 @@ end
 -- Movement
 ---------------------------------------------------------------------
 
-function M.move_only(direction)
+function M.move_only(direction, region)
   local buf =
     vim.api.nvim_get_current_buf()
 
@@ -246,7 +351,7 @@ function M.move_only(direction)
     M.directions[direction]
 
   local row, col =
-    M.current_position()
+    M.current_position(region)
 
   local target_row =
     row + delta.row
@@ -262,10 +367,24 @@ function M.move_only(direction)
     target_col = 0
   end
 
+  local effective_col =
+    target_col
+    + (region and region.prefix_len or 0)
+
+  -- Pad the raw line so the cursor can reach the
+  -- target column.  Bypass the region guard so this
+  -- works on any line (code or comment).
+  M.ensure_col(
+    buf,
+    target_row,
+    effective_col
+  )
+
   M.set_cursor(
     buf,
     target_row,
-    target_col
+    target_col,
+    region
   )
 end
 
